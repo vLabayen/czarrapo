@@ -10,7 +10,7 @@
 #include <openssl/evp.h>
 
 /* Internal modules */
-#include "crrapo.h"
+#include "czarrapo.h"
 #include "rsa.h"
 
 #define MAX_DIRECTORY_SIZE 60
