@@ -9,9 +9,12 @@
 
 /* OpenSSL */
 #include <openssl/evp.h>
+#include <openssl/rsa.h>
+#include <openssl/pem.h>
 
 /* Internal modules */
 #include "czarrapo.h"
+#include "error_handling.h"
 
 #define NUM_RANDOM_BLOCKS	5
 #define ERR_MSG_BUF_SIZE	120
@@ -34,39 +37,6 @@
 
 static bool _ispowerof2(unsigned int x) {
    return x && !(x & (x - 1));
-}
-
-/* Function to be called to handle errors with EVP hashing. */
-static void _handle_EVP_MD_error(const char* msg, EVP_MD_CTX* evp_ctx) {
-	printf("%s\n", msg);
-	if (evp_ctx != NULL) {
-		EVP_MD_CTX_free(evp_ctx);
-	}
-	exit(1);
-}
-
-/* Function to be called to handle errors with EVP encryption. */
-static void _handle_EVP_CIPHER_error(const char* msg, EVP_CIPHER_CTX* evp_ctx, FILE* f1, FILE* f2) {
-	printf("%s\n", msg);
-	if (evp_ctx != NULL) {
-		EVP_CIPHER_CTX_free(evp_ctx);
-	}
-	if (f1 != NULL) {
-		fclose(f1);
-	}
-	if (f2 != NULL) {
-		fclose(f2);
-	}
-	exit(1);
-}
-
-/* Function to be callled to handle errors when opening, writing or reading from file */
-static void _handle_file_action_error(char* msg, FILE* fp) {
-	printf("%s\n", msg);
-	if (fp != NULL) {
-		fclose(fp);
-	}
-	exit(1);
 }
 
 /*
@@ -162,16 +132,16 @@ static void _hash_individual_block(unsigned char* block_hash, unsigned char* inp
 	EVP_MD* hash_type = EVP_get_digestbyname(hash_name);	/* Selected hash type for encryption block*/
 
 	if ( (evp_ctx = EVP_MD_CTX_new()) == NULL ) {
-		_handle_EVP_MD_error("Error: could not allocate hashing context.", NULL);
+		_handle_EVP_MD_error("Error: could not allocate hashing context.", true, NULL);
 	}
 	if ( (EVP_DigestInit_ex(evp_ctx, hash_type, NULL)) != 1) {
-		_handle_EVP_MD_error("Error: could not init EVP hashing context.", evp_ctx);
+		_handle_EVP_MD_error("Error: could not init EVP hashing context.", true, evp_ctx);
 	}
 	if ( (EVP_DigestUpdate(evp_ctx, input, input_size)) != 1 ) {
-		_handle_EVP_MD_error("Error: could not update EVP context.", evp_ctx);
+		_handle_EVP_MD_error("Error: could not update EVP context.", true, evp_ctx);
 	}
 	if ( (EVP_DigestFinal_ex(evp_ctx, block_hash, NULL)) != 1) {
-		_handle_EVP_MD_error("Error: could not retrieve hash for encryption block.", evp_ctx);
+		_handle_EVP_MD_error("Error: could not retrieve hash for encryption block.", true, evp_ctx);
 	}
 	EVP_MD_CTX_free(evp_ctx);
 }
@@ -181,7 +151,7 @@ static void _hash_individual_block(unsigned char* block_hash, unsigned char* inp
  * Each block is then encrypted and written to 'encrypted_file'. 'cipher_name' selects which symmetric mode to use, with 'key' and 'iv'. 'selected_block_index'
  * needs to be passed also so it is not encrypted.
  */
-static void _encrypt_file(const char* plaintext_file, const char* encrypted_file, const char* cipher_name, const unsigned char* key,  const unsigned char* iv, size_t block_size, size_t selected_block_index) {
+static void _encrypt_file(const char* plaintext_file, const char* encrypted_file, const char* cipher_name, const unsigned char* key,  const unsigned char* iv, size_t block_size, size_t selected_block_index, char* public_key_file) {
 	FILE* fp;					/* File handles */
 	FILE* ef;
 	unsigned char block[block_size];		/* Buffer for each block in plaintext file */
@@ -193,15 +163,17 @@ static void _encrypt_file(const char* plaintext_file, const char* encrypted_file
 	EVP_CIPHER* cipher_type = EVP_get_cipherbyname(cipher_name);				/* Cipher mode, selectec with input param */
 	unsigned char cipher_block[block_size + EVP_CIPHER_block_size(cipher_type) - 1];	// https://www.openssl.org/docs/man1.1.1/man3/EVP_EncryptUpdate.html
 
+	RSA* rsa;					/* RSA struct */
+
 	/* Allocate and init cipher context */
 	if ( (evp_ctx = EVP_CIPHER_CTX_new()) == NULL ) {
-		_handle_EVP_CIPHER_error("Error: could not allocate cipher context.", NULL, NULL, NULL);
+		_handle_EVP_CIPHER_error("Error: could not allocate cipher context.", true, NULL, NULL, NULL);
 	}
 	if ( (EVP_EncryptInit_ex(evp_ctx, cipher_type, NULL, key, iv)) != 1) {
-		_handle_EVP_CIPHER_error("Error: could not init EVP cipher contentxt.", evp_ctx, NULL, NULL);
+		_handle_EVP_CIPHER_error("Error: could not init EVP cipher context.", true, evp_ctx, NULL, NULL);
 	}
 
- 	/* Read file in blocks. Encrypt each block and write to file. */
+	/* Read file in blocks. Encrypt each block and write to file. */
 	fp = fopen(plaintext_file, "rb");
 	ef = fopen(encrypted_file, "ab");
 	while( (amount_read = fread(block, sizeof(unsigned char), block_size, fp)) ){
@@ -209,48 +181,123 @@ static void _encrypt_file(const char* plaintext_file, const char* encrypted_file
 		++i;
 
 		#ifdef DEBUG
-			if ((i%500000) == 0) {
+			if ((i%50000) == 0) {
 				printf("[DEBUG] ++ Encrypting block %li ++\n", i);
 			}
 		#endif
 
-		/* Skip RSA block */
+		/* RSA block */
 		if (i == selected_block_index) {
-			continue;
-		}
 
-		/* Encrypt next block */ 
-		if ( (EVP_EncryptUpdate(evp_ctx, cipher_block, &written_cipher_bytes, block, amount_read) != 1) ) {
-			char err_msg[ERR_MSG_BUF_SIZE];
-			sprintf(err_msg, "Error: failure encrypting block %lu.", i);
-			_handle_EVP_CIPHER_error(err_msg, evp_ctx, fp, ef);
-		}
+			FILE* pk;
+			RSA* rsa;
+			EVP_PKEY* pkey;
+			EVP_PKEY_CTX* pkey_ctx;
 
-		/* Write to file */
-		amount_written = fwrite(cipher_block, sizeof(unsigned char), written_cipher_bytes, ef);
-		if (amount_written != written_cipher_bytes) {
-			char err_msg[ERR_MSG_BUF_SIZE];
-			sprintf(err_msg, "Error: failure writing block %lu to output file.", i);
-			_handle_EVP_CIPHER_error(err_msg, evp_ctx, fp, ef);	
-		}
-
-		/* Last block */
-		if (amount_read < block_size) {
-
-			/* End AES. This call will add padding to remaning data */
-			if ( (EVP_EncryptFinal_ex(evp_ctx, cipher_block, &written_cipher_bytes)) != 1) {
-				_handle_EVP_CIPHER_error("Error: failure ciphering final data.", evp_ctx, fp, ef);
+			/* Allocate RSA struct */
+			if ( (rsa = RSA_new()) == NULL ){
+				_handle_RSA_error("Could not allocate RSA struct.\n", false, NULL, NULL, pk, NULL, NULL);
+				_handle_EVP_CIPHER_error("", true, evp_ctx, fp, ef);
 			}
 
-			/* Write remaining data to file */
+			/* Read public key from file, assign to RSA struct and close file */
+			if ( (pk = fopen(public_key_file, "r")) == NULL ) {
+				_handle_file_action_error("Could not open public key file.\n", false, pk);
+				_handle_EVP_CIPHER_error("", true, evp_ctx, fp, ef);
+			}
+			if ( (rsa = PEM_read_RSAPublicKey(pk, &rsa, NULL, NULL)) == NULL ) {
+				_handle_RSA_error("Public key format not understood.\n", false, rsa, NULL, pk, NULL, NULL);
+				_handle_EVP_CIPHER_error("", true, evp_ctx, fp, ef);
+			}
+			fclose(pk);
+			DEBUG_PRINT(("[DEBUG] Public key file at %s read correctly.\n", public_key_file));
+
+			/* Allocate EVP_PKEY struct and assign public key to it. By calling EVP_PKEY_assign_RSA() successfully, we no longer have to free the RSA struct ourselves */
+			if ( (pkey = EVP_PKEY_new()) == NULL ) {
+				_handle_RSA_error("Error: could not allocate EPV_PKEY struct.\n", false, rsa, NULL, NULL, pkey, NULL);
+				_handle_EVP_CIPHER_error("", true, evp_ctx, fp, ef);
+			}
+			if ( (EVP_PKEY_assign_RSA(pkey, rsa)) != 1 ) {
+				_handle_RSA_error("Error: could not assign public key to EVP_PKEY struct.\n", false, rsa, NULL, NULL, pkey, NULL);
+				_handle_EVP_CIPHER_error("", true, evp_ctx, fp, ef);
+			}
+
+			/* Allocate EVP_PKEY_CTX struct and init */
+			if ( (pkey_ctx = EVP_PKEY_CTX_new(pkey, NULL)) == NULL ) {
+				_handle_RSA_error("Error: could not allocate EVP_PKEY_CTX struct.\n", false, NULL, NULL, NULL, pkey, NULL);
+				_handle_EVP_CIPHER_error("", true, evp_ctx, fp, ef);
+			}
+			if ( (EVP_PKEY_encrypt_init(pkey_ctx)) != 1 ) {
+				_handle_RSA_error("Error: could not init EVP_PKEY_CTX struct.\n", false, NULL, NULL, NULL, pkey, pkey_ctx);
+				_handle_EVP_CIPHER_error("", true, evp_ctx, fp, ef);
+			}
+
+			/* Set padding. This assumes that block_size <= RSA_size(rsa). The condition block_size>RSA_size(rsa) should be checked beforehand */
+			// https://crypto.stackexchange.com/a/42100
+			if (block_size == RSA_size(rsa)) {
+				EVP_PKEY_CTX_set_rsa_padding(pkey_ctx, RSA_NO_PADDING);
+			} else {
+				EVP_PKEY_CTX_set_rsa_padding(pkey_ctx, RSA_PKCS1_OAEP_PADDING);
+			}
+
+			/* Get output length */
+			size_t rsa_output_len;
+			if ( (EVP_PKEY_encrypt(pkey_ctx, NULL, &rsa_output_len, block, block_size)) <= 0 ) {
+				_handle_RSA_error("Error: could not encrypt RSA block.\n", false, NULL, NULL, NULL, pkey, pkey_ctx);
+				_handle_EVP_CIPHER_error("", true, evp_ctx, fp, ef);
+			}
+
+			/* Encrypt and free structs */
+			unsigned char rsa_output[rsa_output_len];
+			if ( EVP_PKEY_encrypt(pkey_ctx, rsa_output, &rsa_output_len, block, block_size) <= 0 ) {
+				_handle_RSA_error("Error: could not encrypt RSA block.\n", false, NULL, NULL, NULL, pkey, pkey_ctx);
+				_handle_EVP_CIPHER_error("", true, evp_ctx, fp, ef);
+			}
+			EVP_PKEY_CTX_free(pkey_ctx);
+			EVP_PKEY_free(pkey);
+
+			/* Write to file */
+			if ( (amount_written = fwrite(rsa_output, sizeof(unsigned char), rsa_output_len, ef)) < rsa_output_len ) {
+				_handle_EVP_CIPHER_error("Error: could not write RSA block to encrypted file.\n", true, evp_ctx, fp, ef);
+			}
+			DEBUG_PRINT(("[DEBUG] ++ RSA block (index: %lu) found and encrypted (%lu bytes).\n", i, rsa_output_len));
+
+		/* Normal AES block */
+		} else {
+
+			/* Encrypt next block */ 
+			if ( (EVP_EncryptUpdate(evp_ctx, cipher_block, &written_cipher_bytes, block, amount_read) != 1) ) {
+				char err_msg[ERR_MSG_BUF_SIZE];
+				sprintf(err_msg, "Error: failure encrypting block %lu.", i);
+				_handle_EVP_CIPHER_error(err_msg, true, evp_ctx, fp, ef);
+			}
+
+			/* Write to file */
 			amount_written = fwrite(cipher_block, sizeof(unsigned char), written_cipher_bytes, ef);
 			if (amount_written != written_cipher_bytes) {
 				char err_msg[ERR_MSG_BUF_SIZE];
 				sprintf(err_msg, "Error: failure writing block %lu to output file.", i);
-				_handle_EVP_CIPHER_error(err_msg, evp_ctx, fp, ef);
+				_handle_EVP_CIPHER_error(err_msg, true, evp_ctx, fp, ef);
 			}
 
-			break;
+			/* Last block */
+			if (amount_read < block_size) {
+
+				/* End AES. This call will add padding to remaning data */
+				if ( (EVP_EncryptFinal_ex(evp_ctx, cipher_block, &written_cipher_bytes)) != 1) {
+					_handle_EVP_CIPHER_error("Error: failure ciphering final data.", true, evp_ctx, fp, ef);
+				}
+
+				/* Write remaining data to file */
+				amount_written = fwrite(cipher_block, sizeof(unsigned char), written_cipher_bytes, ef);
+				if (amount_written != written_cipher_bytes) {
+					char err_msg[ERR_MSG_BUF_SIZE];
+					sprintf(err_msg, "Error: failure writing block %lu to output file.", i);
+					_handle_EVP_CIPHER_error(err_msg, true, evp_ctx, fp, ef);
+				}
+
+				break;
+			}
 		}
 	}
 
@@ -263,7 +310,7 @@ static void _encrypt_file(const char* plaintext_file, const char* encrypted_file
  * Writes header to output file:
  * if fast == false: fast (1 byte) + challenge (20 bytes)
  * if fast == true: fast (1 byte) + challenge (20 bytes) + SHA512(challenge + selected_block_index + password) (64 bytes)
- * This forces_encrypt_file() to use fopen() in 'ab' mode instead of 'wb'.
+ * This makes _encrypt_file() have to use fopen() in 'ab' mode instead of 'wb'.
  */
 static void _write_header(char* encrypted_file, bool fast, unsigned char* challenge, size_t selected_block_index, char* password, size_t password_len) {
 	FILE* ef;
@@ -272,20 +319,20 @@ static void _write_header(char* encrypted_file, bool fast, unsigned char* challe
 	if ( (ef = fopen(encrypted_file, "wb")) == NULL ) {
 		char err_msg[ERR_MSG_BUF_SIZE];
 		sprintf(err_msg, "Error opening file %s at _write_header().", encrypted_file);
-		_handle_file_action_error(err_msg, NULL);
+		_handle_file_action_error(err_msg, true, NULL);
 	}
 
 	/* 1 byte - fast mode */
 	if ( (amount_written = fwrite(&fast, sizeof(bool), 1, ef)) < sizeof(bool) ) {
-		_handle_file_action_error("Error: failure during header write to encrypted file.", ef);
+		_handle_file_action_error("Error: failure during header write to encrypted file.", true, ef);
 	}
-	DEBUG_PRINT(("[DEBUG] HEADER: Fast mode flag written (%i bytes)\n", amount_written));
+	DEBUG_PRINT(("[DEBUG] ++ HEADER: Fast mode flag written (%i bytes)\n", amount_written));
 
 	/* 20 bytes - challenge */
 	if ( (amount_written = fwrite(challenge, sizeof(unsigned char), _CHALLENGE_SIZE, ef)) < _CHALLENGE_SIZE ) {
-		_handle_file_action_error("Error: failure during header write to encrypted file.", ef);
+		_handle_file_action_error("Error: failure during header write to encrypted file.", true, ef);
 	}
-	DEBUG_PRINT(("[DEBUG] HEADER: Challenge written (%i bytes)\n", amount_written));
+	DEBUG_PRINT(("[DEBUG] ++ HEADER: Challenge written (%i bytes)\n", amount_written));
 
 	/* 64 bytes - auth = SHA512(challenge + selected_block_index + password) */
 	if (fast == true) {
@@ -303,11 +350,11 @@ static void _write_header(char* encrypted_file, bool fast, unsigned char* challe
 
 		/* Run hash and write output to file */
 		_hash_individual_block(auth, pre_auth, sizeof(pre_auth), _AUTH_HASH);
-		DEBUG_PRINT(("[DEBUG] Hashing pre_auth (%lu bytes) into auth with %s (%i bytes).\n", sizeof(pre_auth), _AUTH_HASH, _AUTH_SIZE));
+		DEBUG_PRINT(("[DEBUG] ++ HEADER: Hashing pre_auth (%lu bytes) into auth with %s (%i bytes).\n", sizeof(pre_auth), _AUTH_HASH, _AUTH_SIZE));
 		if ( (amount_written = fwrite(auth, sizeof(unsigned char), _AUTH_SIZE, ef)) < _AUTH_SIZE ) {
-			_handle_file_action_error("Error: failure during header write to encrypted file.", ef);
+			_handle_file_action_error("Error: failure during header write to encrypted file.", true, ef);
 		}
-		DEBUG_PRINT(("[DEBUG] HEADER: Auth written (%i bytes)\n", amount_written));
+		DEBUG_PRINT(("[DEBUG] ++ HEADER: Auth written (%i bytes)\n", amount_written));
 
 	}
 	fclose(ef);
@@ -322,16 +369,18 @@ void encrypt_file(char* plaintext_file, char* encrypted_file, size_t block_size,
 	}
 	unsigned char selected_block[block_size + password_len];	/* Selected block for encryption */
 
+	/* Check that block size is a power of 2 and TODO: that is not too big for selected key size */
 	if (!_ispowerof2(block_size)) {
 		printf("Error: block_size %li must be a power of 2\n", block_size);
 		exit(1);
 	}
+	//TODO: _check_block_size(public_key_file, block_size);
 
 	/* Get file size (platform independent) */
 	if ( (fp = fopen(plaintext_file, "rb")) == NULL ) {
 		char err_msg[ERR_MSG_BUF_SIZE];
 		sprintf(err_msg, "Error opening file %s at encrypt_file().", plaintext_file);
-		_handle_file_action_error(err_msg, NULL);
+		_handle_file_action_error(err_msg, true, NULL);
 	}
 	fseek(fp, 0, SEEK_END);
 	file_size = ftell(fp);
@@ -357,12 +406,12 @@ void encrypt_file(char* plaintext_file, char* encrypted_file, size_t block_size,
 	if ( (fseek(fp, selected_block_index*block_size, SEEK_SET)) != 0 ) {
 		char err_msg[ERR_MSG_BUF_SIZE];
 		sprintf(err_msg, "Failed to extract block %lu from file %s.", selected_block_index, plaintext_file);
-		_handle_file_action_error(err_msg, fp);
+		_handle_file_action_error(err_msg, true, fp);
 	}
 	if ( (fread(selected_block, sizeof(unsigned char), block_size, fp)) < block_size ) {
 		char err_msg[ERR_MSG_BUF_SIZE];
 		sprintf(err_msg, "Failed to extract block %lu from file %s.", selected_block_index, plaintext_file);
-		_handle_file_action_error(err_msg, fp);
+		_handle_file_action_error(err_msg, true, fp);
 	}
 	fclose(fp);
 
@@ -384,5 +433,7 @@ void encrypt_file(char* plaintext_file, char* encrypted_file, size_t block_size,
 	DEBUG_PRINT(("[DEBUG] Encryption header fully written to %s\n", encrypted_file));
 
 	/* Encrypt file. Use challenge as IV (128 out of 160 bits from SHA1) */
-	_encrypt_file(plaintext_file, encrypted_file, _SYMMETRIC_CIPHER, block_hash, challenge, block_size, selected_block_index);
+	DEBUG_PRINT(("[DEBUG] Starting file encryption.\n"));
+	_encrypt_file(plaintext_file, encrypted_file, _SYMMETRIC_CIPHER, block_hash, challenge, block_size, selected_block_index, public_key_file);
+	DEBUG_PRINT(("[DEBUG] File fully encrypted.\n"));
 }

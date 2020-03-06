@@ -20,7 +20,7 @@ void main(int argc, char* argv[]) {
 	char* passphrase = "asdf";
 	char* directory = "test/";
 	generate_RSA_pair_to_files(passphrase, directory, "czarrapo_rsa", 4096);
-	/
+	*/
 
 	/* File encryption */
 	char* plaintext_file = "test/test.txt";
@@ -32,3 +32,4 @@ void main(int argc, char* argv[]) {
 	bool fast = true;
 	encrypt_file(plaintext_file, encrypted_file, block_size, password, public_key, selected_block, fast);
 }
+
