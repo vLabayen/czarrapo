@@ -1,7 +1,11 @@
 #include <stdbool.h>
 #include "error_handling.h"
 
-/* Function to be callled to handle errors when opening, writing or reading from file */
+void _handle_simple_error(const char* msg) {
+	printf("%s", msg);
+	exit(1);
+}
+
 void _handle_file_action_error(const char* msg, bool exit_on_handle, FILE* fp) {
 	printf("%s", msg);
 	if (fp != NULL) {
@@ -12,7 +16,6 @@ void _handle_file_action_error(const char* msg, bool exit_on_handle, FILE* fp) {
 	}
 }
 
-/* Function to be called to handle errors during RSA operations */
 void _handle_RSA_error(const char* msg, bool exit_on_handle, RSA* rsa, BIGNUM* e, FILE* fp, EVP_PKEY* pkey, EVP_PKEY_CTX* pkey_ctx) {
 	printf("%s", msg);
 	EVP_PKEY_free(pkey);

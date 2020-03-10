@@ -18,11 +18,11 @@
 #define MAX_DIRECTORY_SIZE 60
 
 void generate_RSA_pair_to_files(char* passphrase, char* directory, char* key_name, int keylen) {
-	RSA* rsa;									/* RSA struct */
-	BIGNUM* e;									/* Public exponent */
+	RSA* rsa;					/* RSA struct */
+	BIGNUM* e;					/* Public exponent */
 	char output_file[MAX_DIRECTORY_SIZE];		/* Buffer to store key output path */
-	FILE* fp;									/* File descriptor to write files */
-	int n_chars_written;						/* Variable to check if output directory fits in our buffer */
+	FILE* fp;					/* File descriptor to write files */
+	int n_chars_written;				/* Variable to check if output directory fits in our buffer */
 
 	/* Initialize RSA struct */
 	if ( (rsa = RSA_new()) == NULL) {
@@ -48,8 +48,8 @@ void generate_RSA_pair_to_files(char* passphrase, char* directory, char* key_nam
 	if ( n_chars_written < 0 || n_chars_written > MAX_DIRECTORY_SIZE ) {
 		_handle_RSA_error("Error: RSA keypair output directory too long.\n", true, rsa, e, NULL, NULL, NULL);
 	}
-	DEBUG_PRINT(("[DEBUG] Saving private key to %s\n", output_file));
 
+	DEBUG_PRINT(("[DEBUG] Saving private key to %s\n", output_file));
 	fp = fopen(output_file, "w");
 	if ( !PEM_write_RSAPrivateKey(fp, rsa, EVP_aes_256_cbc(), passphrase, strlen(passphrase), NULL, NULL)) {
 		_handle_RSA_error("Error: could not write private key to file.\n", true, rsa, e, fp, NULL, NULL);
@@ -61,8 +61,8 @@ void generate_RSA_pair_to_files(char* passphrase, char* directory, char* key_nam
 	if ( n_chars_written < 0 || n_chars_written > MAX_DIRECTORY_SIZE ) {
 		_handle_RSA_error("Error: RSA keypair output directory too long.\n", true, rsa, e, NULL, NULL, NULL);
 	}
-	DEBUG_PRINT(("[DEBUG] Saving public key to %s\n", output_file));
 
+	DEBUG_PRINT(("[DEBUG] Saving public key to %s\n", output_file));
 	fp = fopen(output_file, "w");
 	if ( !PEM_write_RSAPublicKey(fp, rsa) ){
 		_handle_RSA_error("Error: could not write public key to file.", true, rsa, e, fp, NULL, NULL);
