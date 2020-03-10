@@ -223,12 +223,6 @@ static void _encrypt_file(const char* plaintext_file, const char* encrypted_file
 				_handle_EVP_CIPHER_error("[ERROR] Could not write RSA block to encrypted file.\n", true, evp_ctx, fp, ef);
 			}
 			DEBUG_PRINT(("[DEBUG] ++ RSA block (index: %lu) found and encrypted (%lu bytes).\n", i, rsa_output_len));
-			printf("input (%i): ", block_size);
-			_print_hex_array(block, block_size);
-			printf("--------------\n");
-			printf("output (%i): ", rsa_output_len);
-			_print_hex_array(rsa_output, rsa_output_len);
-			printf("-----------------------------------------------\n");
 
 		/* Normal AES block */
 		} else {
