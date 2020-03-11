@@ -44,8 +44,8 @@ void generate_RSA_pair_to_files(char* passphrase, char* directory, char* key_nam
 	}
 
 	/* Save private key */
-	n_chars_written = sprintf(output_file, "%s%s", directory, key_name);
-	if ( n_chars_written < 0 || n_chars_written > MAX_DIRECTORY_SIZE ) {
+	n_chars_written = snprintf(output_file, MAX_DIRECTORY_SIZE, "%s%s", directory, key_name);
+	if ( n_chars_written < 0 || n_chars_written >= MAX_DIRECTORY_SIZE ) {
 		_handle_RSA_error("Error: RSA keypair output directory too long.\n", true, rsa, e, NULL, NULL, NULL);
 	}
 
@@ -57,8 +57,8 @@ void generate_RSA_pair_to_files(char* passphrase, char* directory, char* key_nam
 	fclose(fp);
 
 	/* Save public key*/
-	n_chars_written = sprintf(output_file, "%s%s%s", directory, key_name, ".pub");
-	if ( n_chars_written < 0 || n_chars_written > MAX_DIRECTORY_SIZE ) {
+	n_chars_written = snprintf(output_file, MAX_DIRECTORY_SIZE, "%s%s%s", directory, key_name, ".pub");
+	if ( n_chars_written < 0 || n_chars_written >= MAX_DIRECTORY_SIZE ) {
 		_handle_RSA_error("Error: RSA keypair output directory too long.\n", true, rsa, e, NULL, NULL, NULL);
 	}
 

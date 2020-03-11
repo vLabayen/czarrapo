@@ -115,15 +115,20 @@ static void _encrypt_file(const char* plaintext_file, const char* encrypted_file
 	size_t amount_read, amount_written;		/* Number of bytes read or written to files in each fread() or fwrite() call */
 
 	EVP_CIPHER_CTX* evp_ctx;								/* Cipher context struct */
-	EVP_CIPHER* cipher_type = EVP_get_cipherbyname(cipher_name);				/* Cipher mode, selectec with input param */
+	const EVP_CIPHER* cipher_type;								/* Cipher mode, selected with input parameter */
 	unsigned char cipher_block[block_size + EVP_CIPHER_block_size(cipher_type) - 1];	// https://www.openssl.org/docs/man1.1.1/man3/EVP_EncryptUpdate.html
+
+	/* Select cipher */
+	if ( (cipher_type = EVP_get_cipherbyname(cipher_name)) == NULL ){
+		_handle_simple_error("[ERROR] Invalid symmetric cipher selected.\n");
+	}
 
 	/* Allocate and init cipher context */
 	if ( (evp_ctx = EVP_CIPHER_CTX_new()) == NULL ) {
-		_handle_EVP_CIPHER_error("[ERROR] Could not allocate cipher context.", true, NULL, NULL, NULL);
+		_handle_simple_error("[ERROR] Could not allocate cipher context for file encryption.\n");
 	}
 	if ( (EVP_EncryptInit_ex(evp_ctx, cipher_type, NULL, key, iv)) != 1) {
-		_handle_EVP_CIPHER_error("[ERROR] Could not init EVP cipher context.", true, evp_ctx, NULL, NULL);
+		_handle_EVP_CIPHER_error("[ERROR] Could not init EVP cipher context.\n", true, evp_ctx, NULL, NULL);
 	}
 
 	/* Read file in blocks. Encrypt each block and write to file. */
@@ -230,7 +235,7 @@ static void _encrypt_file(const char* plaintext_file, const char* encrypted_file
 			/* Encrypt next block */
 			if ( (EVP_EncryptUpdate(evp_ctx, cipher_block, &written_cipher_bytes, block, amount_read) != 1) ) {
 				char err_msg[ERR_MSG_BUF_SIZE];
-				sprintf(err_msg, "[ERROR] Failure encrypting block %lu.", i);
+				snprintf(err_msg, ERR_MSG_BUF_SIZE, "[ERROR] Failure encrypting block %lu.", i);
 				_handle_EVP_CIPHER_error(err_msg, true, evp_ctx, fp, ef);
 			}
 
@@ -238,7 +243,7 @@ static void _encrypt_file(const char* plaintext_file, const char* encrypted_file
 			amount_written = fwrite(cipher_block, sizeof(unsigned char), written_cipher_bytes, ef);
 			if (amount_written != written_cipher_bytes) {
 				char err_msg[ERR_MSG_BUF_SIZE];
-				sprintf(err_msg, "[ERROR] Failure writing block %lu to output file.", i);
+				snprintf(err_msg, ERR_MSG_BUF_SIZE, "[ERROR] Failure writing block %lu to output file.", i);
 				_handle_EVP_CIPHER_error(err_msg, true, evp_ctx, fp, ef);
 			}
 
@@ -254,7 +259,7 @@ static void _encrypt_file(const char* plaintext_file, const char* encrypted_file
 				amount_written = fwrite(cipher_block, sizeof(unsigned char), written_cipher_bytes, ef);
 				if (amount_written != written_cipher_bytes) {
 					char err_msg[ERR_MSG_BUF_SIZE];
-					sprintf(err_msg, "[ERROR] Failure writing block %lu to output file.", i);
+					snprintf(err_msg, ERR_MSG_BUF_SIZE, "[ERROR] Failure writing block %lu to output file.", i);
 					_handle_EVP_CIPHER_error(err_msg, true, evp_ctx, fp, ef);
 				}
 
@@ -280,7 +285,7 @@ static void _write_header(char* encrypted_file, bool fast, unsigned char* challe
 
 	if ( (ef = fopen(encrypted_file, "wb")) == NULL ) {
 		char err_msg[ERR_MSG_BUF_SIZE];
-		sprintf(err_msg, "[ERROR] Could not open %s at _write_header().", encrypted_file);
+		snprintf(err_msg, ERR_MSG_BUF_SIZE, "[ERROR] Could not open %s at _write_header().", encrypted_file);
 		_handle_file_action_error(err_msg, true, NULL);
 	}
 
@@ -336,14 +341,14 @@ void encrypt_file(char* plaintext_file, char* encrypted_file, unsigned int block
 	/* Check that block size is a power of 2 and TODO: that is not too big for selected key size */
 	if (!_ispowerof2(block_size)) {
 		char err_msg[ERR_MSG_BUF_SIZE];
-		sprintf(err_msg, "[ERROR] block_size %lu must be a power of 2.\n", block_size);
+		snprintf(err_msg, ERR_MSG_BUF_SIZE, "[ERROR] block_size %i must be a power of 2.\n", block_size);
 		_handle_simple_error(err_msg);
 	}
 	//TODO: _check_block_size(public_key_file, block_size);
 
 	/* Get size of plaintext file */
 	file_size = _get_file_size(plaintext_file);
-	DEBUG_PRINT(("[DEBUG] Selected %s for encryption, size of %li bytes.\n", plaintext_file, file_size));
+	DEBUG_PRINT(("[DEBUG] Selected %s for encryption, size of %lu bytes.\n", plaintext_file, file_size));
 
 	/* Get number of blocks in input file for current block size.
 	Int division always rounds down. */
@@ -351,7 +356,7 @@ void encrypt_file(char* plaintext_file, char* encrypted_file, unsigned int block
 	if ( (file_size % block_size) > 0 ) {
 		++num_blocks;
 	}
-	DEBUG_PRINT(("[DEBUG] Dividing file into %li blocks of size %lu.\n", num_blocks, block_size));
+	DEBUG_PRINT(("[DEBUG] Dividing file into %li blocks of size %i.\n", num_blocks, block_size));
 
 	/* Select random block if not already passed in */
 	if ( passed_block_index < 0 || passed_block_index > num_blocks ) {
@@ -366,12 +371,12 @@ void encrypt_file(char* plaintext_file, char* encrypted_file, unsigned int block
 	fp = fopen(plaintext_file, "rb");
 	if ( (fseek(fp, selected_block_index*block_size, SEEK_SET)) != 0 ) {
 		char err_msg[ERR_MSG_BUF_SIZE];
-		sprintf(err_msg, "Failed to extract block %lu from file %s.", selected_block_index, plaintext_file);
+		snprintf(err_msg, ERR_MSG_BUF_SIZE, "Failed to extract block %lu from file %s.", selected_block_index, plaintext_file);
 		_handle_file_action_error(err_msg, true, fp);
 	}
 	if ( (fread(selected_block, sizeof(unsigned char), block_size, fp)) < block_size ) {
 		char err_msg[ERR_MSG_BUF_SIZE];
-		sprintf(err_msg, "Failed to extract block %lu from file %s.", selected_block_index, plaintext_file);
+		snprintf(err_msg, ERR_MSG_BUF_SIZE, "Failed to extract block %lu from file %s.", selected_block_index, plaintext_file);
 		_handle_file_action_error(err_msg, true, fp);
 	}
 	fclose(fp);

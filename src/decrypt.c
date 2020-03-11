@@ -64,6 +64,7 @@ static size_t __find_block_slow(FILE* fp, size_t file_size, unsigned int block_s
 	int i;						/* Counter to acesss each individual block */
  	unsigned char rsa_block[rsa_block_size];	/* Buffer to store each read block */
  	long int end_of_header;				/* Index to the first byte of actual encrypted data*/
+	int amount_read;
 
  	end_of_header = ftell(fp);
 
@@ -77,7 +78,7 @@ static size_t __find_block_slow(FILE* fp, size_t file_size, unsigned int block_s
  	 */
  	for (i=0; i<file_size; i+=block_size) {
  		fseek(fp, end_of_header + i, SEEK_SET);
- 		fread(rsa_block, sizeof(unsigned char), rsa_block_size, fp);
+ 		amount_read = fread(rsa_block, sizeof(unsigned char), rsa_block_size, fp);
 
  		// TODO: decrypt rsa_block with RSA key
  		// TODO: _CHALLENGE_HASH(_BLOCK_HASH(decrypted block + password)) and compare with 'challenge'*/
@@ -144,7 +145,7 @@ void decrypt_file(char* encrypted_file, char* decrypted_file, unsigned int block
 	/* Check that we have a valid block size */
 	if (!_ispowerof2(block_size)) {
 		char err_msg[ERR_MSG_BUF_SIZE];
-		sprintf(err_msg, "[ERROR] block_size %lu must be a power of 2.\n", block_size);
+		snprintf(err_msg, ERR_MSG_BUF_SIZE, "[ERROR] block_size %i must be a power of 2.\n", block_size);
 		_handle_simple_error(err_msg);
 	}
 
@@ -160,7 +161,7 @@ void decrypt_file(char* encrypted_file, char* decrypted_file, unsigned int block
 		RSA_free(rsa);
 	}
 	// This is always zero for now
-	DEBUG_PRINT(("[DEBUG] Found decryption block (index: %i).\n", selected_block_index));
+	DEBUG_PRINT(("[DEBUG] Found decryption block (index: %lu).\n", selected_block_index));
 
 	// TODO: decrypt file with found block
 

@@ -15,7 +15,13 @@ void _print_hex_array(unsigned char* arr, size_t len){
 
 void _hash_individual_block(unsigned char* block_hash, const unsigned char* input, int input_size, const char* hash_name) {
 	EVP_MD_CTX* evp_ctx;					/* EVP hashing context struct */
-	EVP_MD* hash_type = EVP_get_digestbyname(hash_name);	/* Selected hash type for encryption block*/
+	const EVP_MD* hash_type = EVP_get_digestbyname(hash_name);	/* Selected hash type for encryption block*/
+
+	if ( (hash_type = EVP_get_digestbyname(hash_name)) == NULL) {
+		char err_msg[ERR_MSG_BUF_SIZE];
+		snprintf(err_msg, ERR_MSG_BUF_SIZE, "[ERROR] Invalid hash name: %s.\n", hash_name);
+		_handle_simple_error(err_msg);
+	}
 
 	if ( (evp_ctx = EVP_MD_CTX_new()) == NULL ) {
 		_handle_EVP_MD_error("[ERROR] Could not allocate hashing context.", true, NULL);
@@ -43,7 +49,7 @@ size_t _get_file_size(char* filename) {
 
 	if ( (fp = fopen(filename, "rb")) == NULL ) {
 		char err_msg[ERR_MSG_BUF_SIZE];
-		sprintf(err_msg, "Error opening file %s.\n", filename);
+		snprintf(err_msg, ERR_MSG_BUF_SIZE, "Error opening file %s.\n", filename);
 		_handle_simple_error(err_msg);
 	}
 	fseek(fp, 0, SEEK_END);
