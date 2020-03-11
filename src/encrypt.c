@@ -116,12 +116,14 @@ static void _encrypt_file(const char* plaintext_file, const char* encrypted_file
 
 	EVP_CIPHER_CTX* evp_ctx;								/* Cipher context struct */
 	const EVP_CIPHER* cipher_type;								/* Cipher mode, selected with input parameter */
-	unsigned char cipher_block[block_size + EVP_CIPHER_block_size(cipher_type) - 1];	// https://www.openssl.org/docs/man1.1.1/man3/EVP_EncryptUpdate.html
 
 	/* Select cipher */
 	if ( (cipher_type = EVP_get_cipherbyname(cipher_name)) == NULL ){
 		_handle_simple_error("[ERROR] Invalid symmetric cipher selected.\n");
 	}
+
+	// Size: https://www.openssl.org/docs/man1.1.1/man3/EVP_EncryptUpdate.html
+	unsigned char cipher_block[block_size + EVP_CIPHER_block_size(cipher_type) - 1];	/* Buffer to store ciphered block*/
 
 	/* Allocate and init cipher context */
 	if ( (evp_ctx = EVP_CIPHER_CTX_new()) == NULL ) {
@@ -403,3 +405,4 @@ void encrypt_file(char* plaintext_file, char* encrypted_file, unsigned int block
 	_encrypt_file(plaintext_file, encrypted_file, _SYMMETRIC_CIPHER, block_hash, challenge, block_size, selected_block_index, public_key_file);
 	DEBUG_PRINT(("[DEBUG] File fully encrypted at %s.\n", encrypted_file));
 }
+
