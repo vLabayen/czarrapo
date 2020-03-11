@@ -177,7 +177,7 @@ static void _encrypt_file(const char* plaintext_file, const char* encrypted_file
 
 			/* Read public key */
 			if ( (rsa = _read_public_key(public_key_file)) == NULL) {
-				_handle_EVP_CIPHER_error("Could not read public key file. Make sure that the file exists and has proper permissions and format.\n.", true, evp_ctx, fp, ef);
+				_handle_EVP_CIPHER_error("[ERROR] Could not read public key file. Make sure that the file exists and has proper permissions and format.\n", true, evp_ctx, fp, ef);
 			}
 
 			/* Determine padding */

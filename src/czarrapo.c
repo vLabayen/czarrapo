@@ -19,8 +19,8 @@ void main(int argc, char* argv[]) {
 	/* Keypair generation */
 	char* passphrase = "asdf";
 	char* rsa_directory = "test/";
-	//DEBUG_PRINT(([GENERATING RSA KEYPAIR]));
-	//generate_RSA_pair_to_files(passphrase, rsa_directory, "czarrapo_rsa", 4096);
+	DEBUG_PRINT(("[GENERATING RSA KEYPAIR]\n"));
+	generate_RSA_pair_to_files(passphrase, rsa_directory, "czarrapo_rsa", 4096);
 
 	/* File encryption */
 	char* plaintext_file = "test/test.txt";
