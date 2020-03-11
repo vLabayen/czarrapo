@@ -11,6 +11,7 @@
 #include <openssl/evp.h>
 #include <openssl/rsa.h>
 #include <openssl/pem.h>
+#include <openssl/err.h>
 
 /* Internal modules */
 #include "czarrapo.h"
@@ -101,6 +102,28 @@ static size_t _select_block(char* plaintext_file, unsigned int block_size, long 
 	return selected_block_index;
 }
 
+static RSA* _read_public_key(char* public_key_file) {
+	RSA* rsa;
+	FILE* pk;
+
+	if ( (rsa = RSA_new()) == NULL ){
+		return NULL;
+	}
+	if ( (pk = fopen(public_key_file, "r")) == NULL ) {
+		RSA_free(rsa);
+		return NULL;
+	}
+	if ( (rsa = PEM_read_RSAPublicKey(pk, &rsa, NULL, NULL)) == NULL ) {
+		fclose(pk);
+		RSA_free(rsa);
+		return NULL;
+	}
+	DEBUG_PRINT(("[DEBUG] Public key at %s read correctly.\n", public_key_file));
+
+	fclose(pk);
+	return rsa;
+}
+
 /*
  * Reads plaintext_file in blocks of size 'block_size. Each block is then encrypted and written to 'encrypted_file'.
  * 'cipher_name' selects which symmetric mode to use, with 'key' and 'iv'. 'selected_block_index' needs to be passed also
@@ -111,7 +134,7 @@ static void _encrypt_file(const char* plaintext_file, const char* encrypted_file
 	FILE* ef;
 	unsigned char block[block_size];		/* Buffer for each block in plaintext file */
 	int written_cipher_bytes;			/* Amount of bytes written with each call to EVP_EncryptUpdate() */
-	size_t i = 0;					/* Block number for each iteration */
+	size_t i = -1;					/* Block number for each iteration */
 	size_t amount_read, amount_written;		/* Number of bytes read or written to files in each fread() or fwrite() call */
 
 	EVP_CIPHER_CTX* evp_ctx;								/* Cipher context struct */
@@ -146,90 +169,45 @@ static void _encrypt_file(const char* plaintext_file, const char* encrypted_file
 			}
 		#endif
 
+
 		/* RSA block */
 		if (i == selected_block_index) {
+			RSA* rsa;
+			int padding;
 
-			FILE* pk;			/* File handle */
-			RSA* rsa;			/* RSA struct */
-			EVP_PKEY* pkey;			/* Struct to store public key */
-			EVP_PKEY_CTX* pkey_ctx;		/* Struct to store public key encryption context */
-
-			/* Allocate RSA struct */
-			if ( (rsa = RSA_new()) == NULL ){
-				_handle_EVP_CIPHER_error("Could not allocate RSA struct\n.", true, evp_ctx, fp, ef);
+			/* Read public key */
+			if ( (rsa = _read_public_key(public_key_file)) == NULL) {
+				_handle_EVP_CIPHER_error("Could not read public key file. Make sure that the file exists and has proper permissions and format.\n.", true, evp_ctx, fp, ef);
 			}
 
-			/* Read public key from file, assign to RSA struct and close file */
-			if ( (pk = fopen(public_key_file, "r")) == NULL ) {
-				_handle_RSA_error("Could not open public key file.\n", false, rsa, NULL, NULL, NULL, NULL);
-				_handle_EVP_CIPHER_error("", true, evp_ctx, fp, ef);
-			}
-			if ( (rsa = PEM_read_RSAPublicKey(pk, &rsa, NULL, NULL)) == NULL ) {
-				_handle_RSA_error("Public key format not understood.\n", false, rsa, NULL, pk, NULL, NULL);
-				_handle_EVP_CIPHER_error("", true, evp_ctx, fp, ef);
-			}
-			fclose(pk);
-			DEBUG_PRINT(("[DEBUG] Public key file at %s read correctly.\n", public_key_file));
-
-			/* Allocate EVP_PKEY struct and assign public key to it. By calling EVP_PKEY_assign_RSA() successfully,
-			 * we no longer have to free the RSA struct ourselves */
-			if ( (pkey = EVP_PKEY_new()) == NULL ) {
-				_handle_RSA_error("[ERROR] Could not allocate EPV_PKEY struct.\n", false, rsa, NULL, NULL, pkey, NULL);
-				_handle_EVP_CIPHER_error("", true, evp_ctx, fp, ef);
-			}
-			if ( (EVP_PKEY_assign_RSA(pkey, rsa)) != 1 ) {
-				_handle_RSA_error("[ERROR] Could not assign public key to EVP_PKEY struct.\n", false, rsa, NULL, NULL, pkey, NULL);
-				_handle_EVP_CIPHER_error("", true, evp_ctx, fp, ef);
-			}
-
-			/* Allocate EVP_PKEY_CTX struct and init */
-			if ( (pkey_ctx = EVP_PKEY_CTX_new(pkey, NULL)) == NULL ) {
-				_handle_RSA_error("[ERROR] Could not allocate EVP_PKEY_CTX struct.\n", false, NULL, NULL, NULL, pkey, NULL);
-				_handle_EVP_CIPHER_error("", true, evp_ctx, fp, ef);
-			}
-			if ( (EVP_PKEY_encrypt_init(pkey_ctx)) != 1 ) {
-				_handle_RSA_error("[ERROR] Could not init EVP_PKEY_CTX struct.\n", false, NULL, NULL, NULL, pkey, pkey_ctx);
-				_handle_EVP_CIPHER_error("", true, evp_ctx, fp, ef);
-			}
-
-			/* Set padding. This assumes that block size is a power of 2 and !(block_size > RSA_size(rsa)).
-			Those conditions should be checked beforehand */
-			// https://crypto.stackexchange.com/a/42100
+			/* Determine padding */
 			if (block_size == RSA_size(rsa)) {
-				if (EVP_PKEY_CTX_set_rsa_padding(pkey_ctx, RSA_NO_PADDING) <= 0) {
-					_handle_RSA_error("[ERROR] Could not set padding for RSA encryption.\n", false, NULL, NULL, NULL, pkey, pkey_ctx);
-					_handle_EVP_CIPHER_error("", true, evp_ctx, fp, ef);
-				}
-				DEBUG_PRINT(("[DEBUG] Using no padding on RSA block.\n"));
+				padding = RSA_NO_PADDING;
+				DEBUG_PRINT(("[DEBUG] Using no padding for RSA decryption.\n"));
 			} else {
-				if ( EVP_PKEY_CTX_set_rsa_padding(pkey_ctx, RSA_PKCS1_OAEP_PADDING) <= 0) {
-					_handle_RSA_error("[ERROR] Could not set padding for RSA encryption.\n", false, NULL, NULL, NULL, pkey, pkey_ctx);
-					_handle_EVP_CIPHER_error("", true, evp_ctx, fp, ef);
-				}
-				DEBUG_PRINT(("[DEBUG] Using PCKS1_OAEP padding on RSA block.\n"));
+				padding = RSA_PKCS1_OAEP_PADDING;
+				DEBUG_PRINT(("[DEBUG] Using OAEP padding for RSA decryption.\n"));
 			}
 
-			/* Get output length */
-			size_t rsa_output_len;
-			if ( (EVP_PKEY_encrypt(pkey_ctx, NULL, &rsa_output_len, block, block_size)) <= 0 ) {
-				_handle_RSA_error("[ERROR] Could not encrypt RSA block.\n", false, NULL, NULL, NULL, pkey, pkey_ctx);
-				_handle_EVP_CIPHER_error("", true, evp_ctx, fp, ef);
-			}
+			/* Prepare RSA output buffer and encrypt */
+			unsigned char rsa_output[RSA_size(rsa)];
+			if ( RSA_public_encrypt(block_size, block, rsa_output, rsa, padding) < RSA_size(rsa) ) {
+				int ecode = ERR_get_error();
+ 				char* err_msg = ERR_error_string(ecode, NULL);
 
-			/* Encrypt block and free structs */
-			unsigned char rsa_output[rsa_output_len];
-			if ( EVP_PKEY_encrypt(pkey_ctx, rsa_output, &rsa_output_len, block, block_size) <= 0 ) {
-				_handle_RSA_error("[ERROR] Could not encrypt RSA block.\n", false, NULL, NULL, NULL, pkey, pkey_ctx);
-				_handle_EVP_CIPHER_error("", true, evp_ctx, fp, ef);
+ 				_handle_RSA_error(err_msg, false, rsa, NULL);
+				_handle_EVP_CIPHER_error("\n", true, evp_ctx, fp, ef);
 			}
-			EVP_PKEY_CTX_free(pkey_ctx);
-			EVP_PKEY_free(pkey);
 
 			/* Write to file */
-			if ( (amount_written = fwrite(rsa_output, sizeof(unsigned char), rsa_output_len, ef)) < rsa_output_len ) {
-				_handle_EVP_CIPHER_error("[ERROR] Could not write RSA block to encrypted file.\n", true, evp_ctx, fp, ef);
+			if ( (amount_written = fwrite(rsa_output, sizeof(unsigned char), RSA_size(rsa), ef)) < RSA_size(rsa) ) {
+				_handle_file_action_error("[ERROR] Could not write RSA block to encrypted file.\n", false, ef);
+				_handle_RSA_error("", false, rsa, NULL);
+				_handle_EVP_CIPHER_error("", true, evp_ctx, fp, ef);
 			}
-			DEBUG_PRINT(("[DEBUG] ++ RSA block (index: %lu) found and encrypted (%lu bytes).\n", i, rsa_output_len));
+			DEBUG_PRINT(("[DEBUG] RSA block (index: %lu) found and encrypted (%lu bytes).\n", i, amount_written));
+
+			RSA_free(rsa);
 
 		/* Normal AES block */
 		} else {

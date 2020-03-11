@@ -26,46 +26,48 @@ void generate_RSA_pair_to_files(char* passphrase, char* directory, char* key_nam
 
 	/* Initialize RSA struct */
 	if ( (rsa = RSA_new()) == NULL) {
-		_handle_RSA_error("Error: could not allocate RSA struct.\n", true, NULL, NULL, NULL, NULL, NULL);
+		_handle_RSA_error("[ERROR] Could not allocate RSA struct.\n", true, NULL, NULL);
 	}
 
 	/* Initialize public exponent */
 	if ( (e = BN_new()) == NULL ) {
-		_handle_RSA_error("Error: could not allocate BIGNUM struct.\n", true, rsa, NULL, NULL, NULL, NULL);
+		_handle_RSA_error("[ERROR] Could not allocate BIGNUM struct.\n", true, rsa, NULL);
 	}
 	if ( !(BN_set_word(e, RSA_F4)) ) {
-		_handle_RSA_error("Error: BN_set_word().\n", true, rsa, e, NULL, NULL, NULL);
+		_handle_RSA_error("[ERROR] BN_set_word().\n", true, rsa, e);
 	}
 
 	/* Generate keys */
 	DEBUG_PRINT(("[DEBUG] Generating RSA keypair\n"));
 	if ( RSA_generate_key_ex(rsa, keylen, e, NULL) == 0 ){
-		_handle_RSA_error("Error: Could not generate RSA keypair.\n", true, rsa, e, NULL, NULL, NULL);
+		_handle_RSA_error("[ERROR] Could not generate RSA keypair.\n", true, rsa, e);
 	}
 
 	/* Save private key */
 	n_chars_written = snprintf(output_file, MAX_DIRECTORY_SIZE, "%s%s", directory, key_name);
 	if ( n_chars_written < 0 || n_chars_written >= MAX_DIRECTORY_SIZE ) {
-		_handle_RSA_error("Error: RSA keypair output directory too long.\n", true, rsa, e, NULL, NULL, NULL);
+		_handle_RSA_error("[ERROR] RSA keypair output directory too long.\n", true, rsa, e);
 	}
 
 	DEBUG_PRINT(("[DEBUG] Saving private key to %s\n", output_file));
 	fp = fopen(output_file, "w");
 	if ( !PEM_write_RSAPrivateKey(fp, rsa, EVP_aes_256_cbc(), passphrase, strlen(passphrase), NULL, NULL)) {
-		_handle_RSA_error("Error: could not write private key to file.\n", true, rsa, e, fp, NULL, NULL);
+		_handle_RSA_error("[ERROR] Could not write private key to file.\n", false, rsa, e);
+		_handle_file_action_error("", true, fp);
 	}
 	fclose(fp);
 
 	/* Save public key*/
 	n_chars_written = snprintf(output_file, MAX_DIRECTORY_SIZE, "%s%s%s", directory, key_name, ".pub");
 	if ( n_chars_written < 0 || n_chars_written >= MAX_DIRECTORY_SIZE ) {
-		_handle_RSA_error("Error: RSA keypair output directory too long.\n", true, rsa, e, NULL, NULL, NULL);
+		_handle_RSA_error("[ERROR] RSA keypair output directory too long.\n", true, rsa, e);
 	}
 
 	DEBUG_PRINT(("[DEBUG] Saving public key to %s\n", output_file));
 	fp = fopen(output_file, "w");
 	if ( !PEM_write_RSAPublicKey(fp, rsa) ){
-		_handle_RSA_error("Error: could not write public key to file.", true, rsa, e, fp, NULL, NULL);
+		_handle_RSA_error("[ERROR] Could not write public key to file.", false, rsa, e);
+		_handle_file_action_error("", true, fp);
 	}
 	fclose(fp);
 

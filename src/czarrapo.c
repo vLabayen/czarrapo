@@ -19,13 +19,14 @@ void main(int argc, char* argv[]) {
 	/* Keypair generation */
 	char* passphrase = "asdf";
 	char* rsa_directory = "test/";
-	generate_RSA_pair_to_files(passphrase, rsa_directory, "czarrapo_rsa", 4096);
+	//DEBUG_PRINT(([GENERATING RSA KEYPAIR]));
+	//generate_RSA_pair_to_files(passphrase, rsa_directory, "czarrapo_rsa", 4096);
 
 	/* File encryption */
 	char* plaintext_file = "test/test.txt";
 	char* encrypted_file = "test/test.enc";
 	char* public_key = "test/czarrapo_rsa.pub";
-	unsigned int block_size = 256;
+	unsigned int block_size = 512;
 	char* password = "1234";
 	int selected_block = -1;
 	bool fast = false;

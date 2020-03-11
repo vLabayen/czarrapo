@@ -23,7 +23,7 @@ void _handle_simple_error(const char* msg);
 void _handle_file_action_error(const char* msg, bool exit_on_handle, FILE* fp);
 
 /* Function to be called RSA operation errors. */
-void _handle_RSA_error(const char* msg, bool exit_on_handle, RSA* rsa, BIGNUM* e, FILE* fp, EVP_PKEY* pkey, EVP_PKEY_CTX* pkey_ctx);
+void _handle_RSA_error(const char* msg, bool exit_on_handle, RSA* rsa, BIGNUM* e);
 
 /* Function to be called during hashing errors. */
 void _handle_EVP_MD_error(const char* msg, bool exit_on_handle, EVP_MD_CTX* evp_ctx);

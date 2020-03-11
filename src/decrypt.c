@@ -6,6 +6,7 @@
 #include <openssl/rsa.h>
 #include <openssl/pem.h>
 #include <openssl/evp.h>
+#include <openssl/err.h>
 
 /* Internal modules */
 #include "czarrapo.h"
@@ -17,24 +18,27 @@
  * RSA struct.
  */
 static RSA* _read_private_key(const char* private_key_file, const char* passphrase) {
-	FILE *pk;
 	RSA* rsa;
+	FILE *pk;
 
 	/* Allocate RSA struct */
 	if ( (rsa = RSA_new()) == NULL ){
-		_handle_simple_error("Could not allocate RSA struct.\n");
+		return NULL;
 	}
 
 	/* Read private key from file, assign to RSA struct and close file */
 	if ( (pk = fopen(private_key_file, "r")) == NULL ) {
-		_handle_RSA_error("Could not open private key file.\n", true, rsa, NULL, NULL, NULL, NULL);
+		RSA_free(rsa);
+		return NULL;
 	}
 	if ( (rsa = PEM_read_RSAPrivateKey(pk, &rsa, NULL, (void*) passphrase)) == NULL ) {
-		_handle_RSA_error("Private key format not understood.\n", true, rsa, NULL, pk, NULL, NULL);
+		fclose(pk);
+		RSA_free(rsa);
+		return NULL;
 	}
-	fclose(pk);
 	DEBUG_PRINT(("[DEBUG] Private key file at %s read correctly.\n", private_key_file));
 
+	fclose(pk);
 	return rsa;
 }
 
@@ -45,12 +49,14 @@ void _read_basic_header(FILE* encrypted_file_handle, bool* fast, unsigned char* 
 	int amount_read;
 
 	if ( (amount_read = fread(fast, sizeof(bool), 1, encrypted_file_handle)) < sizeof(bool) ) {
-		_handle_RSA_error("[ERROR] Could not read 'fast' flag from encrypted file header.\n", true, rsa, NULL, encrypted_file_handle, NULL, NULL);
+		_handle_RSA_error("[ERROR] Could not read 'fast' flag from encrypted file header.\n", false, rsa, NULL);
+		_handle_file_action_error("", true, encrypted_file_handle);
 	}
 	DEBUG_PRINT(("[DEBUG] ++ HEADER: Fast mode flag read (%i bytes).\n", amount_read));
 
 	if ( (amount_read = fread(challenge, sizeof(unsigned char), _CHALLENGE_SIZE, encrypted_file_handle)) < (sizeof(unsigned char) * _CHALLENGE_SIZE) ) {
-		_handle_RSA_error("[ERROR] Could not read challenge from encrypted file header.\n", true, rsa, NULL, encrypted_file_handle, NULL, NULL);
+		_handle_RSA_error("[ERROR] Could not read challenge from encrypted file header.\n", false, rsa, NULL);
+		_handle_file_action_error("", true, encrypted_file_handle);
 	}
 	DEBUG_PRINT(("[DEBUG] ++ HEADER: Challenge read (%i bytes).\n", amount_read));
 }
@@ -61,12 +67,25 @@ void _read_basic_header(FILE* encrypted_file_handle, bool* fast, unsigned char* 
  * 2. _CHALLENGE_HASH(_BLOCK_HASH(decrypted block + password)) and compare with read challenge
  */
 static size_t __find_block_slow(FILE* fp, size_t file_size, unsigned int block_size, RSA* rsa, unsigned int rsa_block_size, char* password, unsigned char* challenge) {
-	int i;						/* Counter to acesss each individual block */
  	unsigned char rsa_block[rsa_block_size];	/* Buffer to store each read block */
- 	long int end_of_header;				/* Index to the first byte of actual encrypted data*/
-	int amount_read;
+ 	long int end_of_header = ftell(fp);		/* Index to the first byte of actual encrypted data*/
+	size_t i;					/* Current index in encrypted file */
+	int amount_read, padding;			/* Bytes returned from fread(), padding type for decryption */
 
- 	end_of_header = ftell(fp);
+	int decrypted_block_len;					/* Decrypted block length returned from RSA_private_decrypt() */
+	unsigned char decrypted_block[block_size + strlen(password)];	/* Buffer to store decrypted block and later concatenate password */
+	unsigned char block_hash[_BLOCK_HASH_SIZE];			/* Buffer to store hash of decrypted block */
+	unsigned char new_challenge[_CHALLENGE_SIZE];			/* Buffer to store challenge */
+
+	/* Determine padding */
+	if (block_size == rsa_block_size) {
+		padding = RSA_NO_PADDING;
+		DEBUG_PRINT(("[DEBUG] Using no padding for RSA decryption.\n"));
+	} else {
+		padding = RSA_PKCS1_OAEP_PADDING;
+		DEBUG_PRINT(("[DEBUG] Using OAEP padding for RSA decryption.\n"));
+	}
+
 
  	/*
  	 * Read blocks of size 'rsa_block_size' in jumps of 'block_size'.
@@ -80,12 +99,25 @@ static size_t __find_block_slow(FILE* fp, size_t file_size, unsigned int block_s
  		fseek(fp, end_of_header + i, SEEK_SET);
  		amount_read = fread(rsa_block, sizeof(unsigned char), rsa_block_size, fp);
 
- 		// TODO: decrypt rsa_block with RSA key
- 		// TODO: _CHALLENGE_HASH(_BLOCK_HASH(decrypted block + password)) and compare with 'challenge'*/
+ 		/* Decrypt block */
+ 		if ( (decrypted_block_len = RSA_private_decrypt(amount_read, rsa_block, decrypted_block, rsa, padding)) < 0 ) {
+ 			continue;
+ 		}
+
+ 		/* Concatenate with password and get block hash*/
+ 		memcpy(&decrypted_block[decrypted_block_len], password, strlen(password));
+ 		_hash_individual_block(block_hash, decrypted_block, decrypted_block_len + strlen(password), _BLOCK_HASH);
+
+ 		/* Get challenge */
+ 		_hash_individual_block(new_challenge, block_hash, _BLOCK_HASH_SIZE, _CHALLENGE_HASH);
+
+ 		/* Compare with challenge read from header */
+ 		if (memcmp(new_challenge, challenge, _CHALLENGE_SIZE) == 0) {
+ 			return (i/block_size);
+ 		}
  	}
 
-	return 0;
-
+ 	_handle_simple_error("[ERROR] RSA block could not be found.\n");
 }
 
 static size_t __find_block_fast(FILE* fp, size_t file_size, unsigned int block_size, RSA* rsa, unsigned int rsa_block_size, char* password, unsigned char* challenge, unsigned char* auth) {
@@ -109,7 +141,7 @@ static size_t _find_selected_block(char* encrypted_file, size_t encrypted_file_s
 
 	/* Open file handle to read with */
 	if ( (fp = fopen(encrypted_file, "rb")) == NULL ) {
-		_handle_RSA_error("[ERROR] Could not open the encrypted file.\n", true, rsa, NULL, NULL, NULL, NULL);
+		_handle_RSA_error("[ERROR] Could not open the encrypted file.\n", true, rsa, NULL);
 	}
 
 	/* Read first part of header */
@@ -120,10 +152,8 @@ static size_t _find_selected_block(char* encrypted_file, size_t encrypted_file_s
 	if (fast) {
 		unsigned char auth[_AUTH_SIZE];
 		if ( fread(auth, sizeof(unsigned char), _AUTH_SIZE, fp) < ((sizeof(unsigned char)) * _AUTH_SIZE) ) {
-			_handle_RSA_error(
-				"[ERROR] Could not read auth from encrypted file header. Make sure the 'fast' flag is properly set.\n",
-				true, rsa, NULL, fp, NULL, NULL
-			);
+			_handle_RSA_error("[ERROR] Could not read auth from encrypted file header. Make sure the 'fast' flag is properly set.\n", false, rsa, NULL);
+			_handle_file_action_error("", true, fp);
 		}
 		DEBUG_PRINT(("[DEBUG] ++ HEADER: Auth read (%i bytes).\n", _AUTH_SIZE));
 		selected_block_index = __find_block_fast(fp, encrypted_file_size, block_size, rsa, rsa_block_size, password, challenge, auth);
@@ -150,16 +180,19 @@ void decrypt_file(char* encrypted_file, char* decrypted_file, unsigned int block
 	}
 
 	/* Get RSA output block size for current key */
-	rsa = _read_private_key(private_key_file, passphrase);
+	if ( (rsa = _read_private_key(private_key_file, passphrase)) == NULL ){
+		_handle_simple_error("[ERROR] Could not open private key file.\n");
+	}
 	rsa_block_size = RSA_size(rsa);
 
-	/* _find_selected_block() will free 'rsa' */
+	/* Find RSA block */
 	if ( passed_block_index < 0 ) {
 		selected_block_index = _find_selected_block(encrypted_file, encrypted_file_size, block_size, rsa, rsa_block_size, password);
 	} else {
 		selected_block_index = passed_block_index;
-		RSA_free(rsa);
 	}
+	RSA_free(rsa);
+
 	// This is always zero for now
 	DEBUG_PRINT(("[DEBUG] Found decryption block (index: %lu).\n", selected_block_index));
 

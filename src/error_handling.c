@@ -16,15 +16,10 @@ void _handle_file_action_error(const char* msg, bool exit_on_handle, FILE* fp) {
 	}
 }
 
-void _handle_RSA_error(const char* msg, bool exit_on_handle, RSA* rsa, BIGNUM* e, FILE* fp, EVP_PKEY* pkey, EVP_PKEY_CTX* pkey_ctx) {
+void _handle_RSA_error(const char* msg, bool exit_on_handle, RSA* rsa, BIGNUM* e) {
 	printf("%s", msg);
-	EVP_PKEY_free(pkey);
 	RSA_free(rsa);
 	BN_clear_free(e);
-	EVP_PKEY_CTX_free(pkey_ctx);
-	if (fp != NULL) {
-		fclose(fp);
-	}
 	if (exit_on_handle) {
 		exit(1);
 	}
