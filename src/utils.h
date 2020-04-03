@@ -13,7 +13,7 @@
 bool _ispowerof2(unsigned int x);
 
 /* Returns file size in bytes for a given filename */
-size_t _get_file_size(char* filename);
+size_t _get_file_size(const char* filename);
 
 /*
  * Hashes array 'input' of size 'input_size' with hash 'hash_name'. Fills 'block_hash' with the result.
@@ -26,4 +26,4 @@ void _hash_individual_block(unsigned char* block_hash, const unsigned char* inpu
  * Prints 'len' bytes of the buffer 'arr' with hex representation.
  * Should probably only be used for debugging purposes.
  */
-void _print_hex_array(unsigned char* arr, size_t len);
+void _print_hex_array(const unsigned char* arr, size_t len);

@@ -1,3 +1,5 @@
+#include <stdbool.h>
+
 #ifdef DEBUG
 # define DEBUG_PRINT(x) printf x
 #else
@@ -17,4 +19,11 @@
 #define _AUTH_SIZE		64
 
 /* Symmetric cipher to use (256 bit key size, 128 bit IV size) */
-#define _SYMMETRIC_CIPHER	"AES-256-CBC"
+#define _SYMMETRIC_CIPHER	"AES-256-CFB"
+
+/* Encryption header */
+typedef struct {
+	bool fast;
+	unsigned char challenge[_CHALLENGE_SIZE];
+	unsigned char auth[_AUTH_SIZE];
+} CzarrapoHeader;

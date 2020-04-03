@@ -1,10 +1,8 @@
-
 /*
- * This file contains declarations for functions to be used internally
- * when handling errors. 'exit_on_handle' just serves as a flag to call
- * exit(1) at the end of the function. Arguments to the right of
- * 'exit_on_handle' are to be freed or closed accordingly 
- * /
+ * This file contains declarations for functions to be used internally when handling errors.
+ * 'exit_on_handle' just serves as a flag to callexit(1) at the end of the function. Arguments
+ * to the right of 'exit_on_handle' are to be freed or closed accordingly.
+ */
 
 /* Standard library */
 #include <stdio.h>
@@ -15,7 +13,7 @@
 #include <openssl/evp.h>
 #include <openssl/bn.h>
 
-#define ERR_MSG_BUF_SIZE	120
+#define ERR_MSG_BUF_SIZE	220
 
 void _handle_simple_error(const char* msg);
 

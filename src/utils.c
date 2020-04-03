@@ -6,7 +6,7 @@
 #include "utils.h"
 #include "error_handling.h"
 
-void _print_hex_array(unsigned char* arr, size_t len){
+void _print_hex_array(const unsigned char* arr, size_t len){
 	for (int j=0; j<len; ++j) {
 		printf("%x ", arr[j]);
 	}
@@ -42,7 +42,7 @@ bool _ispowerof2(unsigned int x) {
 	return x && !(x & (x - 1));
 }
 
-size_t _get_file_size(char* filename) {
+size_t _get_file_size(const char* filename) {
 
 	FILE* fp;
 	size_t file_size;
