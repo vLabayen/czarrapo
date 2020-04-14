@@ -1,1 +1,1 @@
-void decrypt_file(char* encrypted_file, char* decrypted_file, char* password, char* private_key_file, char* passphrase, size_t selected_block_index);
+int czarrapo_decrypt(CzarrapoContext* ctx, const char* encrypted_file, const char* decrypted_file, long long int selected_block_index);

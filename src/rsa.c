@@ -1,8 +1,4 @@
-
-/* Standard library */
-#include <stdio.h>
 #include <string.h>
-#include <stdbool.h>
 
 /* OpenSSL */
 #include <openssl/rsa.h>
@@ -10,68 +6,69 @@
 #include <openssl/bn.h>
 #include <openssl/evp.h>
 
-/* Internal modules */
-#include "czarrapo.h"
+#include "common.h"
 #include "rsa.h"
-#include "error_handling.h"
 
-#define MAX_DIRECTORY_SIZE 60
+int generate_RSA_pair_to_files(char* passphrase, const char* directory, const char* key_name, int keylen) {
+	RSA* rsa;						/* RSA struct */
+	BIGNUM* e;						/* Public exponent */
+	FILE* fp;						/* File handle for output files*/
+	int dirlen = strlen(directory) + strlen(key_name) + 1;			/* Output directory length */
 
-void generate_RSA_pair_to_files(char* passphrase, char* directory, char* key_name, int keylen) {
-	RSA* rsa;					/* RSA struct */
-	BIGNUM* e;					/* Public exponent */
-	char output_file[MAX_DIRECTORY_SIZE];		/* Buffer to store key output path */
-	FILE* fp;					/* File descriptor to write files */
-	int n_chars_written;				/* Variable to check if output directory fits in our buffer */
+	/* Private key file name */
+	char privfile[dirlen];
+	snprintf(privfile, sizeof(privfile), "%s%s", directory, key_name);
+
+	/* Public key file name */
+	char pubfile[dirlen + 4];
+	snprintf(pubfile, sizeof(pubfile), "%s%s.pub", directory, key_name);
 
 	/* Initialize RSA struct */
 	if ( (rsa = RSA_new()) == NULL) {
-		_handle_RSA_error("[ERROR] Could not allocate RSA struct.\n", true, NULL, NULL);
+		return ERR_FAILURE;
 	}
 
 	/* Initialize public exponent */
 	if ( (e = BN_new()) == NULL ) {
-		_handle_RSA_error("[ERROR] Could not allocate BIGNUM struct.\n", true, rsa, NULL);
+		RSA_free(rsa);
+		return ERR_FAILURE;
 	}
 	if ( !(BN_set_word(e, RSA_F4)) ) {
-		_handle_RSA_error("[ERROR] BN_set_word().\n", true, rsa, e);
+		RSA_free(rsa);
+		BN_clear_free(e);
+		return ERR_FAILURE;
 	}
 
 	/* Generate keys */
-	DEBUG_PRINT(("[DEBUG] Generating RSA keypair\n"));
 	if ( RSA_generate_key_ex(rsa, keylen, e, NULL) == 0 ){
-		_handle_RSA_error("[ERROR] Could not generate RSA keypair.\n", true, rsa, e);
+		RSA_free(rsa);
+		BN_clear_free(e);
+		return ERR_FAILURE;
 	}
 
 	/* Save private key */
-	n_chars_written = snprintf(output_file, MAX_DIRECTORY_SIZE, "%s%s", directory, key_name);
-	if ( n_chars_written < 0 || n_chars_written >= MAX_DIRECTORY_SIZE ) {
-		_handle_RSA_error("[ERROR] RSA keypair output directory too long.\n", true, rsa, e);
-	}
-
-	DEBUG_PRINT(("[DEBUG] Saving private key to %s\n", output_file));
-	fp = fopen(output_file, "w");
-	if ( !PEM_write_RSAPrivateKey(fp, rsa, EVP_aes_256_cbc(), passphrase, strlen(passphrase), NULL, NULL)) {
-		_handle_RSA_error("[ERROR] Could not write private key to file.\n", false, rsa, e);
-		_handle_file_action_error("", true, fp);
+	fp = fopen(privfile, "w");
+	if (PEM_write_RSAPrivateKey(fp, rsa, EVP_aes_256_cbc(), (unsigned char*) passphrase, strlen(passphrase), NULL, NULL) == 0) {
+		RSA_free(rsa);
+		BN_clear_free(e);
+		fclose(fp);
+		return ERR_FAILURE;
 	}
 	fclose(fp);
 
-	/* Save public key*/
-	n_chars_written = snprintf(output_file, MAX_DIRECTORY_SIZE, "%s%s%s", directory, key_name, ".pub");
-	if ( n_chars_written < 0 || n_chars_written >= MAX_DIRECTORY_SIZE ) {
-		_handle_RSA_error("[ERROR] RSA keypair output directory too long.\n", true, rsa, e);
-	}
-
-	DEBUG_PRINT(("[DEBUG] Saving public key to %s\n", output_file));
-	fp = fopen(output_file, "w");
-	if ( !PEM_write_RSAPublicKey(fp, rsa) ){
-		_handle_RSA_error("[ERROR] Could not write public key to file.", false, rsa, e);
-		_handle_file_action_error("", true, fp);
+	/* Save public key */
+	fp = fopen(pubfile, "w");
+	if (PEM_write_RSAPublicKey(fp, rsa) == 0) {
+		RSA_free(rsa);
+		BN_clear_free(e);
+		fclose(fp);
+		return ERR_FAILURE;
 	}
 	fclose(fp);
 
 	/* Free variables */
 	RSA_free(rsa);
 	BN_clear_free(e);
+
+	return 0;
 }

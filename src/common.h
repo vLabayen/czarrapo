@@ -1,5 +1,10 @@
+/*
+ * This file contains a series of constant values that are required in several files.
+ */
+
 #include <stdbool.h>
 
+/* Prints if DEBUG compilation flag is set */
 #ifdef DEBUG
 # define DEBUG_PRINT(x) printf x
 #else
@@ -21,9 +26,21 @@
 /* Symmetric cipher to use (256 bit key size, 128 bit IV size) */
 #define _SYMMETRIC_CIPHER	"AES-256-CFB"
 
-/* Encryption header */
+/* Return value for failure */
+#define ERR_FAILURE		-1
+
+/* Encrypted file header */
 typedef struct {
 	bool fast;
 	unsigned char challenge[_CHALLENGE_SIZE];
 	unsigned char auth[_AUTH_SIZE];
+	int end_offset;
 } CzarrapoHeader;
+
+/* Utility function to get a file size */
+long int _get_file_size(const char* filename);
+
+/* Utility function to hash an input buffer into an output buffer, using 'hash_name' as a hashing function */
+int _hash_individual_block(unsigned char* output, const unsigned char* input, int input_size, const char* hash_name);
+
+void _hexarr(const unsigned char* arr, int len);

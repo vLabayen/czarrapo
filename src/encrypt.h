@@ -1,2 +1,3 @@
+#define NUM_RANDOM_BLOCKS	5
 
-void encrypt_file(char* plaintext_file, char* encrypted_file, char* password, char* public_key_file, int selected_block, bool fast);
+int czarrapo_encrypt(CzarrapoContext* ctx, const char* plaintext_file, const char* encrypted_file, long long int selected_block_index);

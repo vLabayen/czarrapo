@@ -1,163 +1,186 @@
-/* Standard library */
-#include <stdlib.h>
+
 #include <string.h>
 
-/* OpenSSL */
-#include <openssl/rsa.h>
-#include <openssl/pem.h>
+/* */
 #include <openssl/evp.h>
-#include <openssl/err.h>
+#include <openssl/rsa.h>
 
 /* Internal modules */
-#include "czarrapo.h"
-#include "utils.h"
-#include "error_handling.h"
+#include "common.h"
+#include "context.h"
+#include "decrypt.h"
 
-RSA* _load_private_key(const char* private_key_file, const char* passphrase) {
-	RSA* rsa;
-	FILE *pk;
-
-	/* Allocate RSA struct */
-	if ( (rsa = RSA_new()) == NULL ){
-		return NULL;
-	}
-
-	/* Read private key from file, assign to RSA struct and close file */
-	if ( (pk = fopen(private_key_file, "r")) == NULL ) {
-		RSA_free(rsa);
-		return NULL;
-	}
-	if ( (rsa = PEM_read_RSAPrivateKey(pk, &rsa, NULL, (void*) passphrase)) == NULL ) {
-		fclose(pk);
-		RSA_free(rsa);
-		return NULL;
-	}
-
-	fclose(pk);
-	return rsa;
-}
-
-int _read_header(const char* encrypted_file, CzarrapoHeader* header) {
+static int _read_header(const char* encrypted_file, CzarrapoHeader* header) {
 
 	FILE* efp;
-	int header_end_offset;
 	int min_header_size = sizeof(bool) + sizeof(unsigned char) * _CHALLENGE_SIZE;
 
 	/* Open file */
 	if ((efp = fopen(encrypted_file, "rb")) == NULL) {
-			return -1;
+			return ERR_FAILURE;
 	}
 
 	/* Read fast flag and challenge */
 	if ( (fread(header, 1, min_header_size, efp)) < min_header_size) {
 		fclose(efp);
-		return -1;
+		return ERR_FAILURE;
 	}
 
 	/* Read auth */
 	if (header->fast == true) {
 		if ( fread(header->auth, sizeof(unsigned char), _AUTH_SIZE, efp) < (sizeof(unsigned char) * _AUTH_SIZE) ) {
 			fclose(efp);
-			return -1;
+			return ERR_FAILURE;
 		}
 	}
 
-	header_end_offset = ftell(efp);
+	header->end_offset = ftell(efp);
 	fclose(efp);
-	return header_end_offset;
-}
-
-static int _get_key_from_block(unsigned char* key, RSA* rsa, int padding, const unsigned char* input_block, int input_len, const char* password) {
-	int decrypt_len;
-	unsigned char decrypted_block[RSA_size(rsa) + strlen(password)];
-
-	/* Decrypt RSA block */
-	if ( (decrypt_len = RSA_private_decrypt(input_len, input_block, decrypted_block, rsa, padding)) < 0 ) {
-		return -1;
-	}
-
-	/* Concatenate with password and get block hash (aka symmetric key) */
-	memcpy(&decrypted_block[decrypt_len], password, strlen(password));
-	_hash_individual_block(key, decrypted_block, decrypt_len + strlen(password), _BLOCK_HASH);
 	return 0;
 }
 
-/*
- * Finds the RSA block index based on the header challenge, and fills 'key' with the symmetric key.
- * If _CHALLENGE_HASH(_BLOCK_HASH(rsa_block)) == header.challenge, the block is found.
- */
-static long int _find_block_slow(unsigned char* key, const char* encrypted_file, int header_end_offset, RSA* rsa, const char* password, CzarrapoHeader header) {
+/* Fills the 'output' buffer with _BLOCK_HASH(RSA_decrypt(input_block) + ctx->password) */
+static int __get_key_from_block(unsigned char* output, const CzarrapoContext* ctx, int padding, const unsigned char* input_block, int input_len) {
+	int decrypt_len;
+	unsigned char decrypted_block[RSA_size(ctx->private_rsa) + strlen(ctx->password)];
+
+	/* Decrypt RSA block */
+	if ( (decrypt_len = RSA_private_decrypt(input_len, input_block, decrypted_block, ctx->private_rsa, padding)) < 0 ) {
+		return ERR_FAILURE;
+	}
+
+	/* Concatenate with password and get block hash (aka symmetric key) */
+	memcpy(&decrypted_block[decrypt_len], ctx->password, strlen(ctx->password));
+	if (_hash_individual_block(output, decrypted_block, decrypt_len + strlen(ctx->password), _BLOCK_HASH) == ERR_FAILURE) {
+		return ERR_FAILURE;
+	}
+	return 0;
+}
+
+/* Gets the symmetric key from a given block index */
+static int _get_symmetric_key_from_block_index(unsigned char* key, CzarrapoContext* ctx, const char* encrypted_file, CzarrapoHeader* header, long long int selected_block_index) {
+	FILE* ifp;
+	unsigned int block_size = RSA_size(ctx->private_rsa);
+	unsigned char rsa_block[block_size];
+	int amount_read;
+
+	/* Open file */
+	if ( (ifp = fopen(encrypted_file, "rb")) == NULL) {
+		return ERR_FAILURE;
+	}
+
+	/* Move pointer to the selected block and read it */
+	if (fseek(ifp, header->end_offset + (selected_block_index * block_size), SEEK_SET) != 0) {
+		return ERR_FAILURE;
+	}
+	if ( (amount_read = fread(rsa_block, sizeof(unsigned char), block_size, ifp)) < block_size ) {
+		return ERR_FAILURE;
+	}
+	fclose(ifp);
+
+	/* Try to compute the symmetric key from the read block */
+	return __get_key_from_block(key, ctx, RSA_NO_PADDING, rsa_block, amount_read);
+}
+
+/* Finds the RSA block and gets the symmetric key from it, using SLOW mode */
+static int _find_block_slow(unsigned char* output, CzarrapoContext* ctx, const char* encrypted_file, CzarrapoHeader* header) {
 	FILE* efp;					/* Encrypted file handle */
-	unsigned int block_size = RSA_size(rsa);	/* Size of blocks to decrypt */
+	int amount_read;				/* Output of fread() */
+	int block_size = RSA_size(ctx->private_rsa);	/* Size of blocks to decrypt */
+	long long int index = -1;			/* Index for each read block */
 	unsigned char rsa_block[block_size];		/* Buffer to store each read block */
-	size_t i = -1;					/* Block index for each iteration */
-	int amount_read;				/* Number of bytes read from file */
 	unsigned char new_challenge[_CHALLENGE_SIZE];	/* Buffer to store computed challenge */
 
 	/* Open file */
 	if ( (efp = fopen(encrypted_file, "rb")) == NULL ) {
-		_handle_RSA_error("[ERROR] Could not open encrypted file.\n", true, rsa, NULL);
+		return ERR_FAILURE;
 	}
 
-	fseek(efp, header_end_offset, SEEK_SET);
+	/* Read each block and try to compute the challenge from it */
+	fseek(efp, header->end_offset, SEEK_SET);
 	while ( (amount_read = fread(rsa_block, sizeof(unsigned char), block_size, efp)) ) {
+		
+		++index;
 
-		++i;
-
-		/* key = _BLOCK_HASH(RSA_decrypt(rsa_block) + password) */
-		_print_hex_array(rsa_block, 5);
-		if (_get_key_from_block(key, rsa, RSA_NO_PADDING, rsa_block, amount_read, password) == -1) {
+		/* output = _BLOCK_HASH(RSA_decrypt(rsa_block) + password) */
+		if (__get_key_from_block(output, ctx, RSA_NO_PADDING, rsa_block, amount_read) == ERR_FAILURE) {
 			continue;
 		}
 
 		/* challenge = _CHALLENGE_HASH(key) */
-		_hash_individual_block(new_challenge, key, _BLOCK_HASH_SIZE, _CHALLENGE_HASH);
+		if (_hash_individual_block(new_challenge, output, _BLOCK_HASH_SIZE, _CHALLENGE_HASH) == ERR_FAILURE) {
+			return ERR_FAILURE;
+		}
 
 		/* Compare with challenge read from header */
-		if (memcmp(new_challenge, header.challenge, _CHALLENGE_SIZE) == 0) {
+		if (memcmp(new_challenge, header->challenge, _CHALLENGE_SIZE) == 0) {
 			fclose(efp);
-			return i;
+			return index;
 		}
 	}
 
 	fclose(efp);
-	return -1;
+	return ERR_FAILURE;
 }
 
-/*
- * Finds the RSA block based on the auth header field, and fills 'key' with the symmetric key.
- * If _AUTH_HASH(header.challenge + block_index + password) == header.auth: the block is found.
- */
-static long int _find_block_fast(unsigned char* key, const char* encrypted_file, int header_end_offset, RSA* rsa, const char* password, CzarrapoHeader header) {
+/* Finds the RSA block and gets the symmetric key from it, using FAST mode */
+static int _find_block_fast(unsigned char* output, CzarrapoContext* ctx, const char* encrypted_file, CzarrapoHeader* header) {
+	int block_size = RSA_size(ctx->private_rsa);	/* Size of blocks to decrypt */
+	long long int index;				/* Index for each read block */
+	int num_blocks;
 
-	//_AUTH_HASH(challenge + selected_block_index + password))
-	return 0;
+	unsigned char pre_auth[_CHALLENGE_SIZE + sizeof(long long int) + strlen(ctx->password)];	/* Buffer for the hash input */
+	unsigned char new_auth[_AUTH_SIZE];								/* Buffer for the hash output */
+
+	/* Prepare input buffer: pre_auth = challenge + index (to be filled) + password */
+	memcpy(&pre_auth[0], header->challenge, _CHALLENGE_SIZE);
+	memcpy(&pre_auth[_CHALLENGE_SIZE + sizeof(long long int)], ctx->password, strlen(ctx->password));
+
+	/* Fills the index in pre_auth and computes auth from it */
+	num_blocks = _get_file_size(encrypted_file) / block_size;
+	for (index = 0; index < num_blocks; ++index) {
+
+		/* Form new pre_auth and hash into auth */
+		memcpy(&pre_auth[_CHALLENGE_SIZE], &index, sizeof(long long int));
+		if (_hash_individual_block(new_auth, pre_auth, sizeof(pre_auth), _AUTH_HASH) == ERR_FAILURE) {
+			return ERR_FAILURE;
+		}
+
+		/* If auth matches, compute symmetric key for this block */
+		if (memcmp(header->auth, new_auth, _AUTH_SIZE) == 0 ){
+			if (_get_symmetric_key_from_block_index(output, ctx, encrypted_file, header, index) == ERR_FAILURE) {
+				return ERR_FAILURE;
+			}
+			return index;
+		}
+	}
+
+	return ERR_FAILURE;
 }
 
-static void _decrypt_file(const char* encrypted_file, const char* decrypted_file, RSA* rsa, long int selected_block_index, unsigned int block_size, const char* cipher_name, const unsigned char* key, const unsigned char* iv, int header_end_offset) {
-	FILE *ifp, *ofp;			/* File handles for input and output files */
-	unsigned char block[block_size];	/* Buffer for each read block */
-	int amount_read, amount_written;	/* Variables to store results of fread() and fwrite() */
-	int written_decipher_bytes;		/* RSA output length */
-	size_t block_index = 0;			/*  */
+static int _decrypt_file(CzarrapoContext* ctx, const char* encrypted_file, const char* decrypted_file, const unsigned char* key, const CzarrapoHeader* header, long long int selected_block_index) {
+	FILE *ifp, *ofp;				/* File handles for input and output files */
+	int block_size = RSA_size(ctx->private_rsa);	/* Size of each read block */
+	unsigned char block[block_size];		/* Buffer for each read block */
+	long long int index = -1;			/* Index of each read block */
+	int amount_read, amount_written;		/* Variables to store results of fread() and fwrite() */
+	int written_decipher_bytes;			/* Cipher output length */
 
 	const EVP_CIPHER* cipher_type;		/* Cipher mode, selected with input parameter */
 	EVP_CIPHER_CTX* evp_ctx;		/* Cipher context */
 
 	/* Select cipher */
-	if ( (cipher_type = EVP_get_cipherbyname(cipher_name)) == NULL ) {
-		RSA_free(rsa);
-		_handle_simple_error("[ERROR] Invalid symmetric cipher selected.\n");
+	if ( (cipher_type = EVP_get_cipherbyname(_SYMMETRIC_CIPHER)) == NULL ) {
+		return ERR_FAILURE;
 	}
 
 	/* Allocate and init cipher context */
 	if ( (evp_ctx = EVP_CIPHER_CTX_new()) == NULL ) {
-		RSA_free(rsa);
-		_handle_simple_error("[ERROR] Could not allocate cipher context for file encryption.\n");
+		return ERR_FAILURE;
 	}
-	if ( (EVP_DecryptInit_ex(evp_ctx, cipher_type, NULL, key, iv)) != 1) {
-		RSA_free(rsa);
-		_handle_EVP_CIPHER_error("[ERROR] Could not init EVP cipher context.\n", true, evp_ctx, NULL, NULL);
+	if ( (EVP_DecryptInit_ex(evp_ctx, cipher_type, NULL, key, header->challenge)) != 1) {
+		EVP_CIPHER_CTX_free(evp_ctx);
+		return ERR_FAILURE;
 	}
 
 	/* Buffer for the decrypted block */
@@ -165,164 +188,133 @@ static void _decrypt_file(const char* encrypted_file, const char* decrypted_file
 
 	/* Open files */
 	if ( (ifp = fopen(encrypted_file, "rb")) == NULL || (ofp = fopen(decrypted_file, "wb")) == NULL ) {
-		RSA_free(rsa);
-		_handle_EVP_CIPHER_error("[ERROR] Could not open encrypted or output file.\n", true, evp_ctx, NULL, NULL);
+		EVP_CIPHER_CTX_free(evp_ctx);
+		return ERR_FAILURE;
 	}
 	
 	/* Decrypt each block */
-	fseek(ifp, header_end_offset, SEEK_SET);
-	while ( (amount_read = fread(block, sizeof(unsigned char), RSA_size(rsa), ifp)) ) {
+	fseek(ifp, header->end_offset, SEEK_SET);
+	while ( (amount_read = fread(block, sizeof(unsigned char), block_size, ifp)) ) {
+
+		++index;
 
 		/* RSA block */
-		if (block_index == selected_block_index) {
-			int padding;
-
-			/* Determine padding */
-			if (block_size == RSA_size(rsa)) {
-				padding = RSA_NO_PADDING;
-			} else {
-				padding = RSA_PKCS1_OAEP_PADDING;
-			}
+		if (index == selected_block_index) {
 
 			/* Decrypt block */
-			if ( (written_decipher_bytes = RSA_private_decrypt(RSA_size(rsa), block, decipher_block, rsa, padding)) < 0) {
-				
-				RSA_free(rsa);
-				_handle_EVP_CIPHER_error("[ERROR] Could not decrypt RSA block.\n", true, evp_ctx, ifp, ofp);
+			if ( (written_decipher_bytes = RSA_private_decrypt(amount_read, block, decipher_block, ctx->private_rsa, RSA_NO_PADDING)) < 0) {
+				EVP_CIPHER_CTX_free(evp_ctx);
+				fclose(ifp);
+				fclose(ofp);
+				return ERR_FAILURE;
 			}
 
 			/* Write to file */
 			if ( (amount_written = fwrite(decipher_block, sizeof(unsigned char), written_decipher_bytes, ofp)) != written_decipher_bytes ) {
-				RSA_free(rsa);
-				_handle_EVP_CIPHER_error("[ERROR] Could not write decrypted RSA block to file.\n", true, evp_ctx, ifp, ofp);
+				EVP_CIPHER_CTX_free(evp_ctx);
+				fclose(ifp);
+				fclose(ofp);
+				return ERR_FAILURE;
 			}
 
-			
 		/* Regular AES block */
 		} else {
 
 			/* Update with read data */
 			if ( EVP_DecryptUpdate(evp_ctx, decipher_block, &written_decipher_bytes, block, amount_read) != 1 ) {
-				RSA_free(rsa);
-				char err_msg[ERR_MSG_BUF_SIZE];
-				snprintf(err_msg, ERR_MSG_BUF_SIZE, "[ERROR] Failure encrypting block %lu.\n", block_index);
-				_handle_EVP_CIPHER_error(err_msg, true, evp_ctx, ifp, ofp);
+				EVP_CIPHER_CTX_free(evp_ctx);
+				fclose(ifp);
+				fclose(ofp);
+				return ERR_FAILURE;
 			}
 
 			/* Write to file */
 			if ( (amount_written = fwrite(decipher_block, sizeof(unsigned char), written_decipher_bytes, ofp)) != written_decipher_bytes) {
-				RSA_free(rsa);
-				char err_msg[ERR_MSG_BUF_SIZE];
-				snprintf(err_msg, ERR_MSG_BUF_SIZE, "[ERROR] Failure writing block %lu to output file.\n", block_index);
-				_handle_EVP_CIPHER_error(err_msg, true, evp_ctx, ifp, ofp);
+				EVP_CIPHER_CTX_free(evp_ctx);
+				fclose(ifp);
+				fclose(ofp);
+				return ERR_FAILURE;
 			}
 		}
-
-		//printf("Block %lu (%s) %i bytes -> ", block_index, block_index==selected_block_index ? "rsa" : "aes", amount_read);
-		//printf("written %i\n", amount_written);
-
-		++block_index;
 	}
 
 	/* End symmetric cipher */
 	if ( EVP_DecryptFinal_ex(evp_ctx, decipher_block, &written_decipher_bytes) != 1 ) {
-		RSA_free(rsa);
-		_handle_EVP_CIPHER_error("[ERROR] Failure decrypting final block.\n", true, evp_ctx, ifp, ofp);
+		EVP_CIPHER_CTX_free(evp_ctx);
+		fclose(ifp);
+		fclose(ofp);
+		return ERR_FAILURE;
 	}
 
 	/* Write remaining data to file */
 	if ( (amount_written = fwrite(decipher_block, sizeof(unsigned char), written_decipher_bytes, ofp)) != written_decipher_bytes ) {
-		RSA_free(rsa);
-		_handle_EVP_CIPHER_error("[ERROR] Failure writing final block to output file.\n", true, evp_ctx, ifp, ofp);
+		EVP_CIPHER_CTX_free(evp_ctx);
+		fclose(ifp);
+		fclose(ofp);
+		return ERR_FAILURE;
 	}
 
+	EVP_CIPHER_CTX_free(evp_ctx);
 	fclose(ifp);
 	fclose(ofp);
-	EVP_CIPHER_CTX_free(evp_ctx);
 
+	return 0;
 }
 
-static int _get_symmetric_key_from_block_index(unsigned char* key, const char* encrypted_file, int header_end_offset, RSA* rsa, const char* password, CzarrapoHeader header, long int selected_block_index) {
-	FILE* ifp;
-	unsigned int block_size = RSA_size(rsa);
-	unsigned char rsa_block[block_size];
-	int amount_read;
+int czarrapo_decrypt(CzarrapoContext* ctx, const char* encrypted_file, const char* decrypted_file, long long int selected_block_index) {
+	long long int file_size;		/* Input file size */
+	int block_size;				/* Block size determined from RSA key size */
+	CzarrapoHeader header;			/* Encrypted file header */
+	unsigned char key[_BLOCK_HASH_SIZE];	/* Buffer to hold the key, to be filled when the selected block is found */
 
-	if ( (ifp = fopen(encrypted_file, "rb")) == NULL) {
-		return -1;
-	}
-	if (fseek(ifp, header_end_offset + (selected_block_index * block_size), SEEK_SET) != 0) {
-		return -1;
-	}
-	if ( (amount_read = fread(rsa_block, sizeof(unsigned char), block_size, ifp)) < block_size ) {
-		return -1;
-	}
-	fclose(ifp);
-
-	return _get_key_from_block(key, rsa, RSA_NO_PADDING, rsa_block, amount_read, password);
-}
-
-
-
-void decrypt_file(const char* encrypted_file, const char* decrypted_file, const char* password, const char* private_key_file, const char* passphrase, long int selected_block_index) {
-	RSA* rsa;						/* RSA struct for the private key */
-	size_t file_size = _get_file_size(encrypted_file);	/* Size of the input file */
-	unsigned char key[_BLOCK_HASH_SIZE];			/* Buffer to hold the key, to be filled when the selected block is found */
-	unsigned int block_size;				/* Block size, determined by RSA key length */
-	CzarrapoHeader header;					/* Struct to hold encrypted file header */
-	int header_end_offset;					/* Offset of the beginning of actual encrypted data */
-
-	if (password == NULL) {
-		_handle_simple_error("[ERROR] Invalid password\n");
+	/* We need the private key to encrypt files */
+	if (ctx->private_rsa == NULL) {
+		return ERR_FAILURE;
 	}
 
-	/* Load private key */
-	if ( (rsa = _load_private_key(private_key_file, passphrase)) == NULL ) {
-		_handle_simple_error("[ERROR] Could not open private key file.\n");
+	/* Get file and block size */
+	if ( (file_size = _get_file_size(encrypted_file)) == ERR_FAILURE){
+		return ERR_FAILURE;
 	}
-	DEBUG_PRINT(("[DEBUG] Private key file at %s read correctly.\n", private_key_file));
-
-	/* Determine block size */
-	if ( (block_size = RSA_size(rsa)) > file_size ) {
-		_handle_RSA_error("[ERROR] Encrypted file is too small.\n", true, rsa, NULL);
+	if ( (block_size = RSA_size(ctx->private_rsa)) > file_size) {
+		return ERR_FAILURE;
 	}
+	DEBUG_PRINT(("[DEBUG] Selected %s for decryption, size of %lld bytes.\n", encrypted_file, file_size));
 
 	/* Read header information (fast, challenge, auth) */
-	if ( (header_end_offset = _read_header(encrypted_file, &header)) < 0 ) {
-		_handle_RSA_error("[ERROR] Could not read header from encrypted file.\n", true, rsa, NULL);
+	if ( _read_header(encrypted_file, &header) == ERR_FAILURE ) {
+		return ERR_FAILURE;
 	}
-	DEBUG_PRINT(("[DEBUG] File header read correctly (%i bytes).\n", header_end_offset));
+	DEBUG_PRINT(("[DEBUG] File header read correctly (%i bytes).\n", header.end_offset));
 
 	/* Determine RSA block index and retrieve symmetric key = _BLOCK_HASH(RSA_decrypt(selected_block)+password) */
 	if ( selected_block_index < 0 ) {
-
 		if (header.fast) {
-			selected_block_index = _find_block_fast(key, encrypted_file, header_end_offset, rsa, password, header);
+			selected_block_index = _find_block_fast(key, ctx, encrypted_file, &header);
 		} else {
-			selected_block_index = _find_block_slow(key, encrypted_file, header_end_offset, rsa, password, header);
+			selected_block_index = _find_block_slow(key, ctx, encrypted_file, &header);
 		}
 
-		if (selected_block_index < 0) {
-			_handle_RSA_error("[ERROR] Could not find RSA block.\n", true, rsa, NULL);
+		if (selected_block_index == ERR_FAILURE) {
+			return ERR_FAILURE;
 		}
 
 	} else {
-
 		if (selected_block_index * block_size > file_size) {
-			char err_msg[ERR_MSG_BUF_SIZE];
-			snprintf(err_msg, ERR_MSG_BUF_SIZE, "[ERROR] Maximum block index for current file is %lu\n", file_size/block_size);
-			_handle_RSA_error(err_msg, true, rsa, NULL);
+			return ERR_FAILURE;
 		}
 
-		if (_get_symmetric_key_from_block_index(key, encrypted_file, header_end_offset, rsa, password, header, selected_block_index) < 0 ) {
-			_handle_RSA_error("[ERROR] Could not read selected RSA block.\n", true, rsa, NULL);
+		if (_get_symmetric_key_from_block_index(key, ctx, encrypted_file, &header, selected_block_index) == ERR_FAILURE ) {
+			return ERR_FAILURE;
 		}
 	}
-	DEBUG_PRINT(("[DEBUG] Selected block index is %lu.\n", selected_block_index));
+	DEBUG_PRINT(("[DEBUG] Found selected block at index %lld.\n", selected_block_index));
 
-	/* Decrypt file with challenge as IV */
-	_decrypt_file(encrypted_file, decrypted_file, rsa, selected_block_index, block_size, _SYMMETRIC_CIPHER, key, header.challenge, header_end_offset);
+	/* Decrypt and save to output file */
+	if ( _decrypt_file(ctx, encrypted_file, decrypted_file, key, &header, selected_block_index) ) {
+		return ERR_FAILURE;
+	}
 	DEBUG_PRINT(("[DEBUG] File decrypted correctly at %s.\n", decrypted_file));
 
-	RSA_free(rsa);
+	return 0;
 }
