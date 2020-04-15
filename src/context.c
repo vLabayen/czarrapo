@@ -4,7 +4,6 @@
 
 /* OpenSSL */
 #include <openssl/pem.h>
-//#include <openssl/rsa.h>
 
 /* Internal modules */
 #include "common.h"
@@ -59,7 +58,7 @@ static RSA* _load_private_key(const char* private_key_file, const char* passphra
 	return rsa;
 }
 
-/* Initializes a context struct based on input parameters */
+/* Returns an initialized context struct based on input parameters */
 CzarrapoContext* czarrapo_init(const char* public_key_file, const char* private_key_file, const char* passphrase, const char* password, bool fast_mode) {
 
 	/* Allocate memory for our return value */

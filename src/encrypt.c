@@ -142,7 +142,7 @@ static int _write_header(const char* encrypted_file, bool fast, const unsigned c
 	return total_written;
 }
 
-int _encrypt_file(CzarrapoContext* ctx, const char* plaintext_file, const char* encrypted_file, const unsigned char* key, const unsigned char* iv, long long int selected_block_index) {
+static int _encrypt_file(CzarrapoContext* ctx, const char* plaintext_file, const char* encrypted_file, const unsigned char* key, const unsigned char* iv, long long int selected_block_index) {
 	FILE *fp, *ef;					/* input/output file handles */
 	int block_size = RSA_size(ctx->public_rsa);	/* Size of buffers to read and write */
 	int amount_read, amount_written;		/* Result of fread() and fwrite() */
@@ -174,7 +174,7 @@ int _encrypt_file(CzarrapoContext* ctx, const char* plaintext_file, const char* 
 	fp = fopen(plaintext_file, "rb");
 	ef = fopen(encrypted_file, "ab");
 	while ( (amount_read = fread(block, sizeof(unsigned char), block_size, fp)) ){
-		
+
 		++index;
 
 		/* RSA block */

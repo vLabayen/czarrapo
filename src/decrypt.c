@@ -1,7 +1,7 @@
-
+/* Standard library */
 #include <string.h>
 
-/* */
+/* OpenSSL */
 #include <openssl/evp.h>
 #include <openssl/rsa.h>
 
@@ -10,7 +10,8 @@
 #include "context.h"
 #include "decrypt.h"
 
-static int _read_header(const char* encrypted_file, CzarrapoHeader* header) {
+/* Reads file header into a CzarrrapoHeader struct */
+static int _read_header(CzarrapoHeader* header, const char* encrypted_file) {
 
 	FILE* efp;
 	int min_header_size = sizeof(bool) + sizeof(unsigned char) * _CHALLENGE_SIZE;
@@ -58,7 +59,7 @@ static int __get_key_from_block(unsigned char* output, const CzarrapoContext* ct
 }
 
 /* Gets the symmetric key from a given block index */
-static int _get_symmetric_key_from_block_index(unsigned char* key, CzarrapoContext* ctx, const char* encrypted_file, CzarrapoHeader* header, long long int selected_block_index) {
+static int _get_symmetric_key_from_block_index(unsigned char* key, CzarrapoContext* ctx, const char* encrypted_file, const CzarrapoHeader* header, long long int selected_block_index) {
 	FILE* ifp;
 	unsigned int block_size = RSA_size(ctx->private_rsa);
 	unsigned char rsa_block[block_size];
@@ -83,7 +84,7 @@ static int _get_symmetric_key_from_block_index(unsigned char* key, CzarrapoConte
 }
 
 /* Finds the RSA block and gets the symmetric key from it, using SLOW mode */
-static int _find_block_slow(unsigned char* output, CzarrapoContext* ctx, const char* encrypted_file, CzarrapoHeader* header) {
+static int _find_block_slow(unsigned char* output, CzarrapoContext* ctx, const char* encrypted_file, const CzarrapoHeader* header) {
 	FILE* efp;					/* Encrypted file handle */
 	int amount_read;				/* Output of fread() */
 	int block_size = RSA_size(ctx->private_rsa);	/* Size of blocks to decrypt */
@@ -99,7 +100,7 @@ static int _find_block_slow(unsigned char* output, CzarrapoContext* ctx, const c
 	/* Read each block and try to compute the challenge from it */
 	fseek(efp, header->end_offset, SEEK_SET);
 	while ( (amount_read = fread(rsa_block, sizeof(unsigned char), block_size, efp)) ) {
-		
+
 		++index;
 
 		/* output = _BLOCK_HASH(RSA_decrypt(rsa_block) + password) */
@@ -124,9 +125,10 @@ static int _find_block_slow(unsigned char* output, CzarrapoContext* ctx, const c
 }
 
 /* Finds the RSA block and gets the symmetric key from it, using FAST mode */
-static int _find_block_fast(unsigned char* output, CzarrapoContext* ctx, const char* encrypted_file, CzarrapoHeader* header) {
-	int block_size = RSA_size(ctx->private_rsa);	/* Size of blocks to decrypt */
-	long long int index;				/* Index for each read block */
+static int _find_block_fast(unsigned char* output, CzarrapoContext* ctx, const char* encrypted_file, const CzarrapoHeader* header) {
+	int block_size = RSA_size(ctx->private_rsa);			/* Size of blocks to decrypt */
+	long long int file_size = _get_file_size(encrypted_file);	/* Size of input file */
+	long long int index;						/* Index for each read block */
 	int num_blocks;
 
 	unsigned char pre_auth[_CHALLENGE_SIZE + sizeof(long long int) + strlen(ctx->password)];	/* Buffer for the hash input */
@@ -137,7 +139,10 @@ static int _find_block_fast(unsigned char* output, CzarrapoContext* ctx, const c
 	memcpy(&pre_auth[_CHALLENGE_SIZE + sizeof(long long int)], ctx->password, strlen(ctx->password));
 
 	/* Fills the index in pre_auth and computes auth from it */
-	num_blocks = _get_file_size(encrypted_file) / block_size;
+	num_blocks = file_size / block_size;
+	if ((file_size % block_size) > 0) {
+		++num_blocks;
+	}
 	for (index = 0; index < num_blocks; ++index) {
 
 		/* Form new pre_auth and hash into auth */
@@ -158,6 +163,7 @@ static int _find_block_fast(unsigned char* output, CzarrapoContext* ctx, const c
 	return ERR_FAILURE;
 }
 
+/* Decrypts input and saves to output. */
 static int _decrypt_file(CzarrapoContext* ctx, const char* encrypted_file, const char* decrypted_file, const unsigned char* key, const CzarrapoHeader* header, long long int selected_block_index) {
 	FILE *ifp, *ofp;				/* File handles for input and output files */
 	int block_size = RSA_size(ctx->private_rsa);	/* Size of each read block */
@@ -191,7 +197,7 @@ static int _decrypt_file(CzarrapoContext* ctx, const char* encrypted_file, const
 		EVP_CIPHER_CTX_free(evp_ctx);
 		return ERR_FAILURE;
 	}
-	
+
 	/* Decrypt each block */
 	fseek(ifp, header->end_offset, SEEK_SET);
 	while ( (amount_read = fread(block, sizeof(unsigned char), block_size, ifp)) ) {
@@ -282,7 +288,7 @@ int czarrapo_decrypt(CzarrapoContext* ctx, const char* encrypted_file, const cha
 	DEBUG_PRINT(("[DEBUG] Selected %s for decryption, size of %lld bytes.\n", encrypted_file, file_size));
 
 	/* Read header information (fast, challenge, auth) */
-	if ( _read_header(encrypted_file, &header) == ERR_FAILURE ) {
+	if ( _read_header(&header, encrypted_file) == ERR_FAILURE ) {
 		return ERR_FAILURE;
 	}
 	DEBUG_PRINT(("[DEBUG] File header read correctly (%i bytes).\n", header.end_offset));
