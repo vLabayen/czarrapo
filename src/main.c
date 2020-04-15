@@ -23,9 +23,9 @@ int main() {
 
 	/* Generate keypair */
 	DEBUG_PRINT(("[GENERATING RSA KEYPAIR]\n"));
-	if (generate_RSA_pair_to_files(passphrase, "test/", "czarrapo_rsa", 4096) < 0) {
+	/*if (generate_RSA_pair_to_files(passphrase, "test/", "czarrapo_rsa", 4096) < 0) {
 		handle_error(NULL);
-	}
+	}*/
 
 	/* Initialize context */
 	DEBUG_PRINT(("[INITIALIZING CONTEXT]\n"));

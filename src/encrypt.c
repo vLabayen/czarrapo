@@ -322,5 +322,10 @@ int czarrapo_encrypt(CzarrapoContext* ctx, const char* plaintext_file, const cha
 	}
 	DEBUG_PRINT(("[DEBUG] File fully encrypted at %s.\n", encrypted_file));
 
+	/* Zero out symmetric key, IV and selected block */
+	memset(block_hash, 0, _BLOCK_HASH_SIZE);
+	memset(challenge, 0, _CHALLENGE_SIZE);
+	selected_block_index = -1;
+
 	return 0;
 }
