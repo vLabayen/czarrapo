@@ -1,6 +1,11 @@
+#ifndef _CZCONTEXT_H
+#define _CZCONTEXT_H
+
 #include <stdbool.h>
 
 #include <openssl/rsa.h>
+
+#define MAX_PASSWORD_LENGTH 30
 
 /* Context struct to be passed to API functions */
 typedef struct {
@@ -15,3 +20,5 @@ CzarrapoContext* czarrapo_init(const char* public_key_file, const char* private_
 
 /* Free context and zero out password */
 void czarrapo_free(CzarrapoContext* ctx);
+
+#endif

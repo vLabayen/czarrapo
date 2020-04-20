@@ -1,13 +1,14 @@
 /* Standard library */
-#include <stdlib.h>
+#include <stdio.h>
 
 /* Internal modules */
-#include "common.h"
-#include "rsa.h"
-#include "context.h"
-#include "encrypt.h"
-#include "decrypt.h"
+#include "common.h"		// DEBUG_PRINT() definition
+#include "rsa.h"		// generate_RSA_pair_to_files()
+#include "context.h"		// czarrapo_init() and czarrapo_free()
+#include "encrypt.h"		// czarrapo_encrypt()
+#include "decrypt.h"		// czarrapo_decrypt()
 
+/* Sample error handling function */
 void handle_error(CzarrapoContext* ctx) {
 	printf("Error\n");
 	czarrapo_free(ctx);
@@ -18,14 +19,14 @@ int main() {
 
 	CzarrapoContext* ctx;
 	char* passphrase = "asdf";
-	char* password = "abcd";
-	bool fast_mode = true;
+	char* password = "1234";
+	bool fast_mode = false;
 
 	/* Generate keypair */
 	DEBUG_PRINT(("[GENERATING RSA KEYPAIR]\n"));
-	/*if (generate_RSA_pair_to_files(passphrase, "test/", "czarrapo_rsa", 4096) < 0) {
+	if (generate_RSA_pair_to_files(passphrase, "test/", "czarrapo_rsa", 4096) < 0) {
 		handle_error(NULL);
-	}*/
+	}
 
 	/* Initialize context */
 	DEBUG_PRINT(("[INITIALIZING CONTEXT]\n"));

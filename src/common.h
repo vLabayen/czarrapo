@@ -1,6 +1,5 @@
-/*
- * This file contains a series of constant values that are required in several files.
- */
+#ifndef _CZCOMMON_H_
+#define _CZCOMMON_H_
 
 #include <stdbool.h>
 
@@ -43,4 +42,7 @@ long int _get_file_size(const char* filename);
 /* Utility function to hash an input buffer into an output buffer, using 'hash_name' as a hashing function */
 int _hash_individual_block(unsigned char* output, const unsigned char* input, int input_size, const char* hash_name);
 
+/* Utility function for debugging */
 void _hexarr(const unsigned char* arr, int len);
+
+#endif

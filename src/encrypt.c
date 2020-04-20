@@ -93,6 +93,11 @@ static long long int _select_block(const char* plaintext_file, unsigned int bloc
 	return selected_block_index;
 }
 
+/*
+ * Write header to outfile. Format:
+ * Fast mode disabled: fast flag (1 byte) + challenge (_CHALLENGE_SIZE bytes)
+ * Fast mode enabled: fast flag (1 byte) + challenge (_CHALLENGE_SIZE bytes) + auth (_AUTH_SIZE bytes)
+ */
 static int _write_header(const char* encrypted_file, bool fast, const unsigned char* challenge, long long int selected_block_index, const char* password) {
 	FILE* ef;
 	int amount_written, total_written = 0;
@@ -119,7 +124,7 @@ static int _write_header(const char* encrypted_file, bool fast, const unsigned c
 	if (fast == true) {
 
 		/* Buffer for hash input */
-		unsigned char pre_auth[_CHALLENGE_SIZE + sizeof(long long int) + strlen(password)];
+		unsigned char pre_auth[_CHALLENGE_SIZE + sizeof(long long int) + MAX_PASSWORD_LENGTH];
 
 		/* Buffer for hash output */
 		unsigned char auth[_AUTH_SIZE];
@@ -127,7 +132,7 @@ static int _write_header(const char* encrypted_file, bool fast, const unsigned c
 		/* Copy bytes to hash input buffer: pre_auth = challenge + selected_block_index + password */
 		memcpy(&pre_auth[0], challenge, _CHALLENGE_SIZE * sizeof(unsigned char));
 		memcpy(&pre_auth[_CHALLENGE_SIZE * sizeof(unsigned char)], &selected_block_index, sizeof(long long int));
-		memcpy(&pre_auth[_CHALLENGE_SIZE * sizeof(unsigned char) + sizeof(long long int)], password, strlen(password));
+		memcpy(&pre_auth[_CHALLENGE_SIZE * sizeof(unsigned char) + sizeof(long long int)], password, MAX_PASSWORD_LENGTH);
 
 		/* Hash and write to file */
 		_hash_individual_block(auth, pre_auth, sizeof(pre_auth), _AUTH_HASH);
@@ -154,9 +159,8 @@ static int _encrypt_file(CzarrapoContext* ctx, const char* plaintext_file, const
 	const EVP_CIPHER* cipher_type;			/* Cipher mode, selected with input parameter */
 
 	/* Select cipher */
-	if ( (cipher_type = EVP_get_cipherbyname(_SYMMETRIC_CIPHER)) == NULL ){
+	if ( (cipher_type = EVP_get_cipherbyname(_SYMMETRIC_CIPHER)) == NULL )
 		return ERR_FAILURE;
-	}
 
 	// Size: https://www.openssl.org/docs/man1.1.1/man3/EVP_EncryptUpdate.html
 	unsigned char cipher_block[block_size + EVP_CIPHER_block_size(cipher_type) - 1];	/* Buffer to store ciphered block*/
@@ -265,7 +269,7 @@ int czarrapo_encrypt(CzarrapoContext* ctx, const char* plaintext_file, const cha
 	DEBUG_PRINT(("[DEBUG] Selected %s for encryption, size of %lld bytes.\n", plaintext_file, file_size));
 
 	/* Buffer for the selected block + password */
-	unsigned char selected_block[block_size + strlen(ctx->password)];
+	unsigned char selected_block[block_size + MAX_PASSWORD_LENGTH];
 
 	/* Compute number of blocks in file */
 	num_blocks = file_size / block_size;
@@ -298,7 +302,7 @@ int czarrapo_encrypt(CzarrapoContext* ctx, const char* plaintext_file, const cha
 	fclose(fp);
 
 	/* Append password and hash: block_hash = _BLOCK_HASH(selected_block) */
-	memcpy(&selected_block[block_size], ctx->password, strlen(ctx->password));
+	memcpy(&selected_block[block_size], ctx->password, MAX_PASSWORD_LENGTH);
 	unsigned char block_hash[_BLOCK_HASH_SIZE];
 	if ( _hash_individual_block(block_hash, selected_block, sizeof(selected_block), _BLOCK_HASH) == ERR_FAILURE ) {
 		return ERR_FAILURE;

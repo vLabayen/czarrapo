@@ -94,8 +94,11 @@ CzarrapoContext* czarrapo_init(const char* public_key_file, const char* private_
 		czarrapo_free(ctx);
 		return NULL;
 	}
-	ctx->password = malloc(strlen(password) + 1);
-	strcpy(ctx->password, password);
+
+	/* strncpy fills the remaining space with zeros */
+	ctx->password = malloc(MAX_PASSWORD_LENGTH);
+	strncpy(ctx->password, password, MAX_PASSWORD_LENGTH);
+
 	ctx->fast = fast_mode;
 
 	return ctx;
@@ -108,7 +111,7 @@ void czarrapo_free(CzarrapoContext* ctx) {
 		RSA_free(ctx->private_rsa);
 
 		if (ctx->password != NULL) {
-			memset(ctx->password, 0, strlen(ctx->password));
+			memset(ctx->password, 0, MAX_PASSWORD_LENGTH);
 			free(ctx->password);
 		}
 

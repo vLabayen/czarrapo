@@ -1,14 +1,22 @@
 /* Standard library */
 #include <string.h>
 
+/* Threading */
+#ifndef __STDC_NO_THREADS__
+	#include <threads.h>
+	#define NUM_THREADS 7
+#endif
+
 /* OpenSSL */
 #include <openssl/evp.h>
 #include <openssl/rsa.h>
 
 /* Internal modules */
 #include "common.h"
-#include "context.h"
 #include "decrypt.h"
+#ifndef __STDC_NO_THREADS__
+	#include "thread.h"
+#endif
 
 /* Reads file header into a CzarrrapoHeader struct */
 static int _read_header(CzarrapoHeader* header, const char* encrypted_file) {
@@ -17,9 +25,8 @@ static int _read_header(CzarrapoHeader* header, const char* encrypted_file) {
 	int min_header_size = sizeof(bool) + sizeof(unsigned char) * _CHALLENGE_SIZE;
 
 	/* Open file */
-	if ((efp = fopen(encrypted_file, "rb")) == NULL) {
-			return ERR_FAILURE;
-	}
+	if ((efp = fopen(encrypted_file, "rb")) == NULL)
+		return ERR_FAILURE;
 
 	/* Read fast flag and challenge */
 	if ( (fread(header, 1, min_header_size, efp)) < min_header_size) {
@@ -43,7 +50,7 @@ static int _read_header(CzarrapoHeader* header, const char* encrypted_file) {
 /* Fills the 'output' buffer with _BLOCK_HASH(RSA_decrypt(input_block) + ctx->password) */
 static int __get_key_from_block(unsigned char* output, const CzarrapoContext* ctx, int padding, const unsigned char* input_block, int input_len) {
 	int decrypt_len;
-	unsigned char decrypted_block[RSA_size(ctx->private_rsa) + strlen(ctx->password)];
+	unsigned char decrypted_block[RSA_size(ctx->private_rsa) + MAX_PASSWORD_LENGTH];
 
 	/* Decrypt RSA block */
 	if ( (decrypt_len = RSA_private_decrypt(input_len, input_block, decrypted_block, ctx->private_rsa, padding)) < 0 ) {
@@ -51,8 +58,8 @@ static int __get_key_from_block(unsigned char* output, const CzarrapoContext* ct
 	}
 
 	/* Concatenate with password and get block hash (aka symmetric key) */
-	memcpy(&decrypted_block[decrypt_len], ctx->password, strlen(ctx->password));
-	if (_hash_individual_block(output, decrypted_block, decrypt_len + strlen(ctx->password), _BLOCK_HASH) == ERR_FAILURE) {
+	memcpy(&decrypted_block[decrypt_len], ctx->password, MAX_PASSWORD_LENGTH);
+	if (_hash_individual_block(output, decrypted_block, decrypt_len + MAX_PASSWORD_LENGTH, _BLOCK_HASH) == ERR_FAILURE) {
 		return ERR_FAILURE;
 	}
 	return 0;
@@ -82,6 +89,163 @@ static int _get_symmetric_key_from_block_index(unsigned char* key, CzarrapoConte
 	/* Try to compute the symmetric key from the read block */
 	return __get_key_from_block(key, ctx, RSA_NO_PADDING, rsa_block, amount_read);
 }
+
+#ifndef __STDC_NO_THREADS__
+
+static int _find_block_slow_worker(void* thread_context_ptr) {
+
+	int exit_status = 0;
+	
+	/* Retrieve context */
+	thread_context_t* thread_context = (thread_context_t*) thread_context_ptr;
+	thread_data_t* thread_data;
+
+	unsigned char local_output[_BLOCK_HASH_SIZE];	/* Buffer to be filled by __get_key_from_block() */
+	unsigned char new_challenge[_CHALLENGE_SIZE];	/* Buffer to be filled by  _hash_individual_block() */
+
+	DEBUG_PRINT(("[DEBUG] Starting main loop @ thread %li\n", thrd_current()));
+
+	while (true) {
+
+		if ( (thread_data = tlock_pop(thread_context->queue)) != NULL ) {
+
+			/* Break loop on kill signal */
+			if (thread_data->block == NULL) {
+				__thread_data_free(thread_data);
+				break;
+			}
+
+			/* Do not process block if search is done */
+			if (*(thread_context->output_index) < 0) {
+
+				/* local_output = _BLOCK_HASH(RSA_decrypt(block) + ctx->password) */
+				if (__get_key_from_block(local_output, thread_context->ctx, RSA_NO_PADDING, thread_data->block, thread_data->size) == ERR_FAILURE) {
+					__thread_data_free(thread_data);
+					continue;
+				}
+
+				/* new_challenge = _CHALLENGE_HASH(local_output) */
+				if (_hash_individual_block(new_challenge, local_output, _BLOCK_HASH_SIZE, _CHALLENGE_HASH) == ERR_FAILURE) {
+					__thread_data_free(thread_data);
+					continue;
+				}
+
+				/* Compare with challenge read from header. If found, copy found block index and computed key to their expected locations */
+				if (memcmp(new_challenge, thread_context->header->challenge, _CHALLENGE_SIZE) == 0) {
+					memcpy(thread_context->output, local_output, _BLOCK_HASH_SIZE);
+					memcpy(thread_context->output_index, &thread_data->index, sizeof(long long int));
+					exit_status = 1;
+				}
+			}
+
+			__thread_data_free(thread_data);
+		}
+	}
+
+	DEBUG_PRINT(("[DEBUG] Exiting @ thread %li (found block: %s)\n", thrd_current(), exit_status ? "yes": "no"));
+	__thread_context_free(thread_context);
+	thrd_exit(0);
+}
+
+int _find_block_slow_reader(void* reader_data_ptr) {
+	reader_data_t* reader_data = (reader_data_t*) reader_data_ptr;
+	int amount_read;
+	long long int index = 0;
+	thread_data_t* thread_data;
+	FILE* efp;
+
+	DEBUG_PRINT(("[DEBUG] Starting file read @ thread %li\n", thrd_current()));
+
+	/* Open file */
+	if ( (efp = fopen(reader_data->input_file, "rb")) == NULL ) {
+		__reader_data_free(reader_data);
+		thrd_exit(ERR_FAILURE);
+	}
+
+	/* Move pointer to beginning of data */
+	if ( fseek(efp, reader_data->header->end_offset, SEEK_SET) != 0 ){
+		__reader_data_free(reader_data);
+		thrd_exit(ERR_FAILURE);
+	}
+
+	/* Read file into heap-allocated structs */
+	thread_data = __thread_data_init(reader_data->block_size, index);
+	while ( (amount_read = fread(thread_data->block, sizeof(unsigned char), reader_data->block_size, efp)) ) {
+
+		/* Update with amount read and push to queue */
+		thread_data->size = amount_read;
+		tlock_push(reader_data->queue, thread_data);
+
+		/* Prepare next item */
+		thread_data = __thread_data_init(reader_data->block_size, ++index);
+	}
+	fclose(efp);
+	__thread_data_free(thread_data);
+
+	/* Send kill signals */
+	for (int i=0; i<NUM_THREADS; ++i) {
+		thread_data = __thread_data_init(0, i - 2*i -1);
+		tlock_push(reader_data->queue, thread_data);
+	}
+
+	/* Free resources and exit */
+	__reader_data_free(reader_data);
+	thrd_exit(0);
+}
+
+
+static int _find_block_slow_threads(unsigned char* output, CzarrapoContext* ctx, const char* encrypted_file, const CzarrapoHeader* header) {
+	int block_size = RSA_size(ctx->private_rsa);	/* Size of blocks to decrypt */
+	
+	thrd_t threads[NUM_THREADS+1];			/* Array of threads */
+	thread_context_t* thread_context;		/* Initial data passed to thread */
+	tlock_queue_t* queue;				/* Synchronized queue */
+	int res;					/* Thread exit status */
+
+	/* Threads will store the found index here. there should only be one result, so no need to make it atomic */
+	long long int output_index = -1;		
+
+	/* Initialize queue */
+	if ( (queue = tlock_init()) == NULL )
+		return ERR_FAILURE;
+
+	/* Start file reading thread */
+	reader_data_t* reader_data = __reader_data_init(encrypted_file, block_size, queue, header);
+	if ( thrd_create(&threads[0], _find_block_slow_reader, reader_data) != thrd_success ) {
+		return ERR_FAILURE;
+	}
+
+	/* Start processing threads, each with its context */
+	for (int i=1; i<NUM_THREADS+1; ++i) {
+		if ( (thread_context = __thread_context_init(output, &output_index, queue, ctx, header)) == NULL )
+			continue;
+		if ( thrd_create(&threads[i], _find_block_slow_worker, thread_context) != thrd_success ){
+			continue;
+			printf("[ERROR] Could not start thread %i\n", i);
+		}
+	}
+
+	/* Join file read thread */
+	if ( thrd_join(threads[0], &res) != thrd_success) {
+		;;
+	}
+	DEBUG_PRINT(("[DEBUG] Reading thread exited %s.\n", !res ? "successfully": "with error"));
+
+	/* Join processing threads */
+	for (int i=1; i<NUM_THREADS+1; ++i) {
+		if ( thrd_join(threads[i], NULL) != thrd_success )
+			continue;
+	}
+
+	/* Free queue */
+	tlock_free(queue);
+
+	if (output_index >= 0)
+		return output_index;
+	return ERR_FAILURE;
+}
+
+#else
 
 /* Finds the RSA block and gets the symmetric key from it, using SLOW mode */
 static int _find_block_slow(unsigned char* output, CzarrapoContext* ctx, const char* encrypted_file, const CzarrapoHeader* header) {
@@ -124,6 +288,8 @@ static int _find_block_slow(unsigned char* output, CzarrapoContext* ctx, const c
 	return ERR_FAILURE;
 }
 
+#endif
+
 /* Finds the RSA block and gets the symmetric key from it, using FAST mode */
 static int _find_block_fast(unsigned char* output, CzarrapoContext* ctx, const char* encrypted_file, const CzarrapoHeader* header) {
 	int block_size = RSA_size(ctx->private_rsa);			/* Size of blocks to decrypt */
@@ -131,12 +297,12 @@ static int _find_block_fast(unsigned char* output, CzarrapoContext* ctx, const c
 	long long int index;						/* Index for each read block */
 	int num_blocks;
 
-	unsigned char pre_auth[_CHALLENGE_SIZE + sizeof(long long int) + strlen(ctx->password)];	/* Buffer for the hash input */
+	unsigned char pre_auth[_CHALLENGE_SIZE + sizeof(long long int) + MAX_PASSWORD_LENGTH];	/* Buffer for the hash input */
 	unsigned char new_auth[_AUTH_SIZE];								/* Buffer for the hash output */
 
 	/* Prepare input buffer: pre_auth = challenge + index (to be filled) + password */
 	memcpy(&pre_auth[0], header->challenge, _CHALLENGE_SIZE);
-	memcpy(&pre_auth[_CHALLENGE_SIZE + sizeof(long long int)], ctx->password, strlen(ctx->password));
+	memcpy(&pre_auth[_CHALLENGE_SIZE + sizeof(long long int)], ctx->password, MAX_PASSWORD_LENGTH);
 
 	/* Fills the index in pre_auth and computes auth from it */
 	num_blocks = file_size / block_size;
@@ -274,17 +440,14 @@ int czarrapo_decrypt(CzarrapoContext* ctx, const char* encrypted_file, const cha
 	unsigned char key[_BLOCK_HASH_SIZE];	/* Buffer to hold the key, to be filled when the selected block is found */
 
 	/* We need the private key to encrypt files */
-	if (ctx->private_rsa == NULL) {
+	if (ctx->private_rsa == NULL)
 		return ERR_FAILURE;
-	}
 
 	/* Get file and block size */
-	if ( (file_size = _get_file_size(encrypted_file)) == ERR_FAILURE){
+	if ( (file_size = _get_file_size(encrypted_file)) == ERR_FAILURE)
 		return ERR_FAILURE;
-	}
-	if ( (block_size = RSA_size(ctx->private_rsa)) > file_size) {
+	if ( (block_size = RSA_size(ctx->private_rsa)) > file_size)
 		return ERR_FAILURE;
-	}
 	DEBUG_PRINT(("[DEBUG] Selected %s for decryption, size of %lld bytes.\n", encrypted_file, file_size));
 
 	/* Read header information (fast, challenge, auth) */
@@ -298,7 +461,13 @@ int czarrapo_decrypt(CzarrapoContext* ctx, const char* encrypted_file, const cha
 		if (header.fast) {
 			selected_block_index = _find_block_fast(key, ctx, encrypted_file, &header);
 		} else {
+			#ifndef __STDC_NO_THREADS__
+			DEBUG_PRINT(("[DEBUG] C11 threads support found.\n"));
+			selected_block_index = _find_block_slow_threads(key, ctx, encrypted_file, &header);
+			#else
+			DEBUG_PRINT(("[DEBUG] C11 threads support not found.\n"));
 			selected_block_index = _find_block_slow(key, ctx, encrypted_file, &header);
+			#endif
 		}
 
 		if (selected_block_index == ERR_FAILURE) {
