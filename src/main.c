@@ -2,7 +2,6 @@
 #include <stdio.h>
 
 /* Internal modules */
-#include "common.h"		// DEBUG_PRINT() definition
 #include "rsa.h"		// generate_RSA_pair_to_files()
 #include "context.h"		// czarrapo_init() and czarrapo_free()
 #include "encrypt.h"		// czarrapo_encrypt()
@@ -23,23 +22,23 @@ int main() {
 	bool fast_mode = false;
 
 	/* Generate keypair */
-	DEBUG_PRINT(("[GENERATING RSA KEYPAIR]\n"));
+	printf("[GENERATING RSA KEYPAIR]\n");
 	if (generate_RSA_pair_to_files(passphrase, "test/", "czarrapo_rsa", 4096) < 0) {
 		handle_error(NULL);
 	}
 
 	/* Initialize context */
-	DEBUG_PRINT(("[INITIALIZING CONTEXT]\n"));
+	printf("[INITIALIZING CONTEXT]\n");
 	if ( (ctx = czarrapo_init("test/czarrapo_rsa.pub", "test/czarrapo_rsa", passphrase, password, fast_mode)) == NULL )
 		handle_error(NULL);
 
 	/* Encrypt file */
-	DEBUG_PRINT(("[STARTING ENCRYPTION ROUTINE]\n"));
+	printf("[STARTING ENCRYPTION ROUTINE]\n");
 	if (czarrapo_encrypt(ctx, "test/test.txt", "test/test.crypt", -1) < 0)
 		handle_error(ctx);
 
 	/* Decrypt file */
-	DEBUG_PRINT(("[STARTING DECRYPTION ROUTINE]\n"));
+	printf("[STARTING DECRYPTION ROUTINE]\n");
 	if (czarrapo_decrypt(ctx, "test/test.crypt", "test/test.decrypt", -1) < 0)
 		handle_error(ctx);
 

@@ -4,10 +4,15 @@
 czarrapo is a file encryption engine which uses RSA, AES and several hashing functions underneath. It solves the problem of delivering a symmetric key to encrypt/decrypt files, and also avoids using asymmetric ciphers for great amounts of data, which can in turn become slow.
 
 ## Compiling and running a test ##
-NOTE: run everything from the project root directory as indicated, since relative file paths are being used.\
-Compile: `sh make.sh`\
-Create random file to run program on: `bash test/generate_big_file.bash`\
-Run: `bin/czarrapo`
+1. Generate test file for encryption and decryption:
+`make testfile`
+2. Compile program:
+	* Standard compilation: `make`
+	* Additional debug printing: `make debug`
+3. Run test program: `bin/czarrapo`
+4. Compare original and decrypted file:\
+`md5sum test/test.txt; md5sum test/test.decrypt`
+5. Clean up RSA keypair, test file and output binary: `make clean`
 
 ## Usage ##
 The main example is written in `src/main.c`. The API consists of 5 functions:
