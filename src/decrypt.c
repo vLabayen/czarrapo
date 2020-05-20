@@ -4,7 +4,9 @@
 /* Threading */
 #ifndef __STDC_NO_THREADS__
 	#include <threads.h>
-	#define NUM_THREADS 7
+	#ifndef NUM_THREADS
+		#define NUM_THREADS 7
+	#endif
 #endif
 
 /* OpenSSL */
@@ -65,7 +67,7 @@ static int __get_key_from_block(unsigned char* output, const CzarrapoContext* ct
 	return 0;
 }
 
-/* Gets the symmetric key from a given block index */
+/* Computes the symmetric key from a given block index */
 static int _get_symmetric_key_from_block_index(unsigned char* key, CzarrapoContext* ctx, const char* encrypted_file, const CzarrapoHeader* header, long long int selected_block_index) {
 	FILE* ifp;
 	unsigned int block_size = RSA_size(ctx->private_rsa);
@@ -82,6 +84,7 @@ static int _get_symmetric_key_from_block_index(unsigned char* key, CzarrapoConte
 		return ERR_FAILURE;
 	}
 	if ( (amount_read = fread(rsa_block, sizeof(unsigned char), block_size, ifp)) < block_size ) {
+		fclose(ifp);
 		return ERR_FAILURE;
 	}
 	fclose(ifp);
@@ -193,7 +196,7 @@ int _find_block_slow_reader(void* reader_data_ptr) {
 	thrd_exit(0);
 }
 
-
+/* Finds the RSA block and gets the symmetric key from it, using SLOW mode. Uses C11 threads. */
 static int _find_block_slow_threads(unsigned char* output, CzarrapoContext* ctx, const char* encrypted_file, const CzarrapoHeader* header) {
 	int block_size = RSA_size(ctx->private_rsa);	/* Size of blocks to decrypt */
 	
@@ -216,12 +219,16 @@ static int _find_block_slow_threads(unsigned char* output, CzarrapoContext* ctx,
 	}
 
 	/* Start processing threads, each with its context */
+	DEBUG_PRINT(("[DEBUG] Starting %i threads for block search.\n", NUM_THREADS));
 	for (int i=1; i<NUM_THREADS+1; ++i) {
-		if ( (thread_context = __thread_context_init(output, &output_index, queue, ctx, header)) == NULL )
+		if ( (thread_context = __thread_context_init(output, &output_index, queue, ctx, header)) == NULL ) {
+			printf("[ERROR] Could not init context for thread %i.\n", i);
 			continue;
+		}
 		if ( thrd_create(&threads[i], _find_block_slow_worker, thread_context) != thrd_success ){
-			continue;
 			printf("[ERROR] Could not start thread %i\n", i);
+			__thread_context_free(thread_context);
+			continue;
 		}
 	}
 
@@ -338,8 +345,8 @@ static int _decrypt_file(CzarrapoContext* ctx, const char* encrypted_file, const
 	int amount_read, amount_written;		/* Variables to store results of fread() and fwrite() */
 	int written_decipher_bytes;			/* Cipher output length */
 
-	const EVP_CIPHER* cipher_type;		/* Cipher mode, selected with input parameter */
-	EVP_CIPHER_CTX* evp_ctx;		/* Cipher context */
+	const EVP_CIPHER* cipher_type;			/* Cipher mode, selected with input parameter */
+	EVP_CIPHER_CTX* evp_ctx;			/* Cipher context */
 
 	/* Select cipher */
 	if ( (cipher_type = EVP_get_cipherbyname(_SYMMETRIC_CIPHER)) == NULL ) {

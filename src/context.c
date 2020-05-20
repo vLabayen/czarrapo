@@ -63,8 +63,9 @@ CzarrapoContext* czarrapo_init(const char* public_key_file, const char* private_
 
 	/* Allocate memory for our return value */
 	CzarrapoContext* ctx;
-	if ((ctx = malloc(sizeof(CzarrapoContext))) == NULL)
+	if ((ctx = malloc(sizeof(CzarrapoContext))) == NULL) {
 		return NULL;
+	}
 
 	/* Initialize values that will later be malloc'd to NULL */
 	ctx->password = NULL;

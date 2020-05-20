@@ -1,13 +1,16 @@
 CC=gcc
 CFLAGS=-O3 -flto -std=c11 -fPIE -Wall
 LDFLAGS=-lcrypto -lssl -lm -pthread
-DEBUGFLAGS=-DDEBUG
+DEBUG_FLAGS=-D DEBUG
 
-main: src/*.c
-	$(CC) $(CFLAGS) $? $(LDFLAGS) -o bin/czarrapo
+num_threads=7
+DEFINE_FLAGS=-D NUM_THREADS=$(num_threads)
+
+czarrapo: src/*.c
+	$(CC) $(CFLAGS) $(DEFINE_FLAGS) $? $(LDFLAGS) -o bin/czarrapo
 
 debug: src/*.c
-	$(CC) $(CFLAGS) $(DEBUGFLAGS) $? $(LDFLAGS) -o bin/czarrapo
+	$(CC) $(CFLAGS) $(DEFINE_FLAGS) $(DEBUG_FLAGS) $? $(LDFLAGS) -o bin/czarrapo
 
 testfile:
 	bash test/generate_test_file.bash

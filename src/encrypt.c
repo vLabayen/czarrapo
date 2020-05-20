@@ -21,7 +21,7 @@ static double __block_entropy(unsigned char* buf, unsigned int block_size) {
 	/* Order bytes in input block */
 	int i, j;
 	char tmp;
-	for (i = 0; i<block_size-1; ++i){
+	for (i = 0; i<block_size-1; ++i) {
 		for (j=i+1; j<block_size; ++j) {
 			if (buf[i] > buf[j]) {
 				tmp = buf[i];
@@ -98,7 +98,7 @@ static long long int _select_block(const char* plaintext_file, unsigned int bloc
  * Fast mode disabled: fast flag (1 byte) + challenge (_CHALLENGE_SIZE bytes)
  * Fast mode enabled: fast flag (1 byte) + challenge (_CHALLENGE_SIZE bytes) + auth (_AUTH_SIZE bytes)
  */
-static int _write_header(const char* encrypted_file, bool fast, const unsigned char* challenge, long long int selected_block_index, const char* password) {
+static int _write_header(const CzarrapoContext* ctx, const char* encrypted_file, const unsigned char* challenge, long long int selected_block_index) {
 	FILE* ef;
 	int amount_written, total_written = 0;
 
@@ -107,7 +107,7 @@ static int _write_header(const char* encrypted_file, bool fast, const unsigned c
 		return ERR_FAILURE;
 
 	/* 1 byte - fast mode */
-	if ( (amount_written = fwrite(&fast, sizeof(bool), 1, ef)) < sizeof(bool) ) {
+	if ( (amount_written = fwrite(&(ctx->fast), sizeof(bool), 1, ef)) < sizeof(bool) ) {
 		fclose(ef);
 		return ERR_FAILURE;
 	}
@@ -121,7 +121,7 @@ static int _write_header(const char* encrypted_file, bool fast, const unsigned c
 	total_written += amount_written;
 
 	/* 64 bytes - auth = SHA512(challenge + selected_block_index + password) */
-	if (fast == true) {
+	if (ctx->fast == true) {
 
 		/* Buffer for hash input */
 		unsigned char pre_auth[_CHALLENGE_SIZE + sizeof(long long int) + MAX_PASSWORD_LENGTH];
@@ -132,7 +132,7 @@ static int _write_header(const char* encrypted_file, bool fast, const unsigned c
 		/* Copy bytes to hash input buffer: pre_auth = challenge + selected_block_index + password */
 		memcpy(&pre_auth[0], challenge, _CHALLENGE_SIZE * sizeof(unsigned char));
 		memcpy(&pre_auth[_CHALLENGE_SIZE * sizeof(unsigned char)], &selected_block_index, sizeof(long long int));
-		memcpy(&pre_auth[_CHALLENGE_SIZE * sizeof(unsigned char) + sizeof(long long int)], password, MAX_PASSWORD_LENGTH);
+		memcpy(&pre_auth[_CHALLENGE_SIZE * sizeof(unsigned char) + sizeof(long long int)], ctx->password, MAX_PASSWORD_LENGTH);
 
 		/* Hash and write to file */
 		_hash_individual_block(auth, pre_auth, sizeof(pre_auth), _AUTH_HASH);
@@ -145,9 +145,10 @@ static int _write_header(const char* encrypted_file, bool fast, const unsigned c
 
 	fclose(ef);
 	return total_written;
+
 }
 
-static int _encrypt_file(CzarrapoContext* ctx, const char* plaintext_file, const char* encrypted_file, const unsigned char* key, const unsigned char* iv, long long int selected_block_index) {
+static int _encrypt_file(const CzarrapoContext* ctx, const char* plaintext_file, const char* encrypted_file, const unsigned char* key, const unsigned char* iv, long long int selected_block_index) {
 	FILE *fp, *ef;					/* input/output file handles */
 	int block_size = RSA_size(ctx->public_rsa);	/* Size of buffers to read and write */
 	int amount_read, amount_written;		/* Result of fread() and fwrite() */
@@ -177,7 +178,7 @@ static int _encrypt_file(CzarrapoContext* ctx, const char* plaintext_file, const
 	/* Read file in blocks. Encrypt each block and write to file. */
 	fp = fopen(plaintext_file, "rb");
 	ef = fopen(encrypted_file, "ab");
-	while ( (amount_read = fread(block, sizeof(unsigned char), block_size, fp)) ){
+	while ( (amount_read = fread(block, sizeof(unsigned char), block_size, fp)) ) {
 
 		++index;
 
@@ -188,7 +189,7 @@ static int _encrypt_file(CzarrapoContext* ctx, const char* plaintext_file, const
 			if ( RSA_public_encrypt(amount_read, block, cipher_block, ctx->public_rsa, RSA_NO_PADDING) < block_size ) {
 				int ecode = ERR_get_error();
  				char* err_msg = ERR_error_string(ecode, NULL);
- 				printf("%s\n", err_msg);
+ 				printf("[ERROR] %s\n", err_msg);
 
  				EVP_CIPHER_CTX_free(evp_ctx);
  				fclose(fp);
@@ -260,7 +261,7 @@ int czarrapo_encrypt(CzarrapoContext* ctx, const char* plaintext_file, const cha
 	}
 
 	/* Get file and block size */
-	if ( (file_size = _get_file_size(plaintext_file)) == ERR_FAILURE){
+	if ( (file_size = _get_file_size(plaintext_file)) == ERR_FAILURE) {
 		return ERR_FAILURE;
 	}
 	if ( (block_size = RSA_size(ctx->public_rsa)) > file_size) {
@@ -315,7 +316,7 @@ int czarrapo_encrypt(CzarrapoContext* ctx, const char* plaintext_file, const cha
 	}
 
 	/* Write encryption header to output file */
-	if ( (header_size = _write_header(encrypted_file, ctx->fast, challenge, selected_block_index, ctx->password)) == ERR_FAILURE ) {
+	if ( (header_size = _write_header(ctx, encrypted_file, challenge, selected_block_index)) == ERR_FAILURE ) {
 		return ERR_FAILURE;
 	}
 	DEBUG_PRINT(("[DEBUG] Encryption header fully written (%i bytes).\n", header_size));
