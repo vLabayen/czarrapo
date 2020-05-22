@@ -14,9 +14,12 @@ static RSA* _load_public_key(const char* public_key_file) {
 	RSA* rsa;
 	FILE* pk;
 
+	/* Allocate RSA struct */
 	if ( (rsa = RSA_new()) == NULL ){
 		return NULL;
 	}
+
+	/* Read public key from file, assign to RSA struct and close file */
 	if ( (pk = fopen(public_key_file, "r")) == NULL ) {
 		RSA_free(rsa);
 		return NULL;
@@ -60,15 +63,26 @@ static RSA* _load_private_key(const char* private_key_file, const char* passphra
 
 /* Returns an initialized context struct based on input parameters */
 CzarrapoContext* czarrapo_init(const char* public_key_file, const char* private_key_file, const char* passphrase, const char* password, bool fast_mode) {
-
-	/* Allocate memory for our return value */
 	CzarrapoContext* ctx;
+
+	/* Allocate initial struct */
 	if ((ctx = malloc(sizeof(CzarrapoContext))) == NULL) {
 		return NULL;
 	}
 
-	/* Initialize values that will later be malloc'd to NULL */
-	ctx->password = NULL;
+	/* Load cipher mode */
+	ctx->fast = fast_mode;
+
+	/* Load password - strncpy() fills remaining space with zeros */
+	if (password == NULL) {
+		czarrapo_free(ctx);
+		return NULL;
+	}
+	if ( (ctx->password = malloc(MAX_PASSWORD_LENGTH)) == NULL ) {
+		czarrapo_free(ctx);
+		return NULL;
+	}
+	strncpy(ctx->password, password, MAX_PASSWORD_LENGTH);
 
 	/* Load public key */
 	if (public_key_file != NULL) {
@@ -90,19 +104,8 @@ CzarrapoContext* czarrapo_init(const char* public_key_file, const char* private_
 		ctx->private_rsa = NULL;
 	}
 
-	/* Assign password and fast mode */
-	if (password == NULL){
-		czarrapo_free(ctx);
-		return NULL;
-	}
-
-	/* strncpy fills the remaining space with zeros */
-	ctx->password = malloc(MAX_PASSWORD_LENGTH);
-	strncpy(ctx->password, password, MAX_PASSWORD_LENGTH);
-
-	ctx->fast = fast_mode;
-
 	return ctx;
+
 }
 
 /* Frees the context struct and zeroes out the password */

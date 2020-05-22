@@ -8,7 +8,7 @@
 #include "decrypt.h"		// czarrapo_decrypt()
 
 /* Sample error handling function */
-void handle_error(CzarrapoContext* ctx) {
+static void handle_error(CzarrapoContext* ctx) {
 	printf("Error\n");
 	czarrapo_free(ctx);
 	exit(1);
@@ -19,7 +19,7 @@ int main() {
 	CzarrapoContext* ctx;
 	char* passphrase = "asdf";
 	char* password = "1234";
-	bool fast_mode = false;
+	bool fast_mode = true;
 
 	/* Generate keypair */
 	printf("[GENERATING RSA KEYPAIR]\n");

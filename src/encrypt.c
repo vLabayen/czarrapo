@@ -54,6 +54,24 @@ static double __block_entropy(unsigned char* buf, unsigned int block_size) {
 }
 
 /*
+ * Helper function that returns a random index from 0 to num_blocks.
+ * We need this function in case RAND_MAX < num_blocks, as it is implementation
+ * dependent. It always satisfies RAND_MAX >= 32767
+ */
+static long long int __get_random_index(long long int num_blocks) {
+
+	if (RAND_MAX >= num_blocks)
+		return ((long long int)rand() % num_blocks);
+
+	long long int output = 0;
+	for (int i=0; i<(num_blocks / RAND_MAX); ++i) {
+		output += rand();
+	}
+
+	return output;
+}
+
+/*
  * Checks entropy for NUM_RANDOM_BLOCKS blocks in 'plaintext_file' and returns the index
  * for the most entropic one. Blocks are selected randomly, but the caller must seed the
  * RNG with srand() previously.
@@ -70,7 +88,7 @@ static long long int _select_block(const char* plaintext_file, unsigned int bloc
 	fp = fopen(plaintext_file, "rb");
 	for (i = 0; i<NUM_RANDOM_BLOCKS; ++i) {
 
-		random_index = rand() % num_blocks;
+		random_index = __get_random_index(num_blocks);
 
 		/* Get block with selected index */
 		fseek(fp, (random_index) * block_size, SEEK_SET);

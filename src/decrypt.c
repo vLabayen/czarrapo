@@ -150,7 +150,7 @@ static int _find_block_slow_worker(void* thread_context_ptr) {
 	thrd_exit(0);
 }
 
-int _find_block_slow_reader(void* reader_data_ptr) {
+static int _find_block_slow_reader(void* reader_data_ptr) {
 	reader_data_t* reader_data = (reader_data_t*) reader_data_ptr;
 	int amount_read;
 	long long int index = 0;
@@ -300,36 +300,45 @@ static int _find_block_slow(unsigned char* output, CzarrapoContext* ctx, const c
 /* Finds the RSA block and gets the symmetric key from it, using FAST mode */
 static int _find_block_fast(unsigned char* output, CzarrapoContext* ctx, const char* encrypted_file, const CzarrapoHeader* header) {
 	int block_size = RSA_size(ctx->private_rsa);			/* Size of blocks to decrypt */
+	long long int* index;						/* Index for the block search */
 	long long int file_size = _get_file_size(encrypted_file);	/* Size of input file */
-	long long int index;						/* Index for each read block */
 	int num_blocks;
 
 	unsigned char pre_auth[_CHALLENGE_SIZE + sizeof(long long int) + MAX_PASSWORD_LENGTH];	/* Buffer for the hash input */
-	unsigned char new_auth[_AUTH_SIZE];								/* Buffer for the hash output */
+	unsigned char new_auth[_AUTH_SIZE];							/* Buffer for the hash output */
 
 	/* Prepare input buffer: pre_auth = challenge + index (to be filled) + password */
 	memcpy(&pre_auth[0], header->challenge, _CHALLENGE_SIZE);
 	memcpy(&pre_auth[_CHALLENGE_SIZE + sizeof(long long int)], ctx->password, MAX_PASSWORD_LENGTH);
 
-	/* Fills the index in pre_auth and computes auth from it */
-	num_blocks = file_size / block_size;
-	if ((file_size % block_size) > 0) {
+	/* Compute number of blocks */
+	num_blocks = (file_size - header->end_offset) / block_size;
+	if ( ((file_size - header->end_offset) % block_size) > 0 ) {
 		++num_blocks;
 	}
-	for (index = 0; index < num_blocks; ++index) {
 
-		/* Form new pre_auth and hash into auth */
-		memcpy(&pre_auth[_CHALLENGE_SIZE], &index, sizeof(long long int));
+	/*
+	 * Index points to the location in the pre_auth buffer that will hold the block index.
+	 * The layout is the following:
+	 * [challenge (_CHALLENGE_SIZE)] [index (sizeof(long long int))] [password (MAX_PASSWORD_LEN)]
+	 */
+	index = (long long int*) &pre_auth[_CHALLENGE_SIZE];
+
+	/* Try with different values for the index */
+	for (*index=0; *index < num_blocks; ++(*index)) {
+
+		// Hash into auth
 		if (_hash_individual_block(new_auth, pre_auth, sizeof(pre_auth), _AUTH_HASH) == ERR_FAILURE) {
 			return ERR_FAILURE;
 		}
 
-		/* If auth matches, compute symmetric key for this block */
+		// If auth matches, compute symmetric key for this block
 		if (memcmp(header->auth, new_auth, _AUTH_SIZE) == 0 ){
-			if (_get_symmetric_key_from_block_index(output, ctx, encrypted_file, header, index) == ERR_FAILURE) {
+			// output = _BLOCK_HASH(RSA_decrypt(file_blocks[index]) + ctx->password)
+			if (_get_symmetric_key_from_block_index(output, ctx, encrypted_file, header, *index) == ERR_FAILURE) {
 				return ERR_FAILURE;
 			}
-			return index;
+			return *index;
 		}
 	}
 
