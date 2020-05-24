@@ -1,6 +1,8 @@
 CC=gcc
 
 num_threads=7
+test_file_size=1M
+
 CFLAGS=-O3 -flto -std=c11 -fPIE -Wall -D NUM_THREADS=$(num_threads)
 LDFLAGS=-lcrypto -lssl -lm -pthread
 DEBUG_FLAGS=-D DEBUG
@@ -12,7 +14,8 @@ debug: src/*.c
 	$(CC) $(CFLAGS) $(DEBUG_FLAGS) $? $(LDFLAGS) -o bin/czarrapo
 
 testfile:
-	bash test/generate_test_file.bash
+	dd if=/dev/urandom of=test/test.txt bs=$(test_file_size) count=1
+	ls -lh test/test.txt
 
 clean:
 	rm -f bin/czarrapo
