@@ -56,3 +56,9 @@ int czarrapo_decrypt(CzarrapoContext* ctx, const char* encrypted_file, const cha
 void czarrapo_free(CzarrapoContext* ctx);
 
 ```
+
+## TO-DO ##
+* Better random block selection (in `_select_block()`). Do not use max. entropy as criterion.
+* Add error codes for different types of errors (currently the public API just returns -1 on error).
+* Better interrupt handling (SIGINT and SIGTERM on Linux).
+* Parallel encryption and decryption for big files.

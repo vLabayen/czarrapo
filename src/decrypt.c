@@ -97,7 +97,9 @@ static int _get_symmetric_key_from_block_index(unsigned char* key, CzarrapoConte
 
 static int _find_block_slow_worker(void* thread_context_ptr) {
 
+	#ifdef DEBUG
 	int exit_status = 0;
+	#endif
 	
 	/* Retrieve context */
 	thread_context_t* thread_context = (thread_context_t*) thread_context_ptr;
@@ -137,7 +139,10 @@ static int _find_block_slow_worker(void* thread_context_ptr) {
 				if (memcmp(new_challenge, thread_context->header->challenge, _CHALLENGE_SIZE) == 0) {
 					memcpy(thread_context->output, local_output, _BLOCK_HASH_SIZE);
 					memcpy(thread_context->output_index, &thread_data->index, sizeof(long long int));
+
+					#ifdef DEBUG
 					exit_status = 1;
+					#endif
 				}
 			}
 

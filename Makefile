@@ -17,7 +17,12 @@ testfile:
 	dd if=/dev/urandom of=test/test.txt bs=$(test_file_size) count=1
 	ls -lh test/test.txt
 
+shared: src/common.c src/decrypt.c src/thread.c src/context.c src/encrypt.c src/rsa.c
+	gcc $(CFLAGS) -fPIC -shared $(LDFLAGS) $(DEBUG_FLAGS) $^ -o bin/czarrapo.so
+
+all: czarrapo shared
+
 clean:
-	rm -f bin/czarrapo
+	rm -f bin/czarrapo*
 	rm -f test/czarrapo_rsa test/czarrapo_rsa.pub
 	rm -f test/test.txt test/test.crypt test/test.decrypt
