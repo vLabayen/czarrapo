@@ -23,7 +23,7 @@
 #define _AUTH_SIZE		64
 
 /* Symmetric cipher to use (256 bit key size, 128 bit IV size) */
-#define _SYMMETRIC_CIPHER	"AES-256-CFB"
+#define _SYMMETRIC_CIPHER	"AES-256-CTR"
 
 /* Return value for failure */
 #define ERR_FAILURE		-1
