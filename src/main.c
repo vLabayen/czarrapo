@@ -22,10 +22,10 @@ int main() {
 	bool fast_mode = true;
 
 	/* Generate keypair */
-	printf("[GENERATING RSA KEYPAIR]\n");
+	/*printf("[GENERATING RSA KEYPAIR]\n");
 	if (generate_RSA_pair_to_files(passphrase, "test/", "czarrapo_rsa", 4096) < 0) {
 		handle_error(NULL);
-	}
+	}*/
 
 	/* Initialize context */
 	printf("[INITIALIZING CONTEXT]\n");

@@ -1,15 +1,11 @@
 /* Standard library */
 #include <string.h>
-
-/* Threading */
 #ifndef __STDC_NO_THREADS__
 	#include <threads.h>
-	#ifndef NUM_THREADS
-		#define NUM_THREADS 7
-	#endif
 #endif
 
 /* OpenSSL */
+#include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/rsa.h>
 
@@ -18,20 +14,26 @@
 #include "decrypt.h"
 #ifndef __STDC_NO_THREADS__
 	#include "thread.h"
+	#ifndef NUM_THREADS
+		#define NUM_THREADS 7
+	#endif
 #endif
 
-/* Reads file header into a CzarrrapoHeader struct */
 static int _read_header(CzarrapoHeader* header, const char* encrypted_file) {
-
 	FILE* efp;
-	int min_header_size = sizeof(bool) + sizeof(unsigned char) * _CHALLENGE_SIZE;
 
 	/* Open file */
 	if ((efp = fopen(encrypted_file, "rb")) == NULL)
 		return ERR_FAILURE;
 
-	/* Read fast flag and challenge */
-	if ( (fread(header, 1, min_header_size, efp)) < min_header_size) {
+	/* Read fast flag */
+	if ( (fread(&(header->fast), sizeof(bool), 1, efp)) < sizeof(bool)) {
+		fclose(efp);
+		return ERR_FAILURE;
+	}
+
+	/* Read challenge */
+	if ( (fread(header->challenge, sizeof(unsigned char), _CHALLENGE_SIZE, efp)) < (sizeof(unsigned char) * _CHALLENGE_SIZE)) {
 		fclose(efp);
 		return ERR_FAILURE;
 	}
@@ -385,6 +387,8 @@ static int _decrypt_file(CzarrapoContext* ctx, const char* encrypted_file, const
 		return ERR_FAILURE;
 	}
 
+	setvbuf(ofp, NULL, _IOFBF, 16384);
+
 	/* Decrypt each block */
 	fseek(ifp, header->end_offset, SEEK_SET);
 	while ( (amount_read = fread(block, sizeof(unsigned char), block_size, ifp)) ) {
@@ -396,6 +400,10 @@ static int _decrypt_file(CzarrapoContext* ctx, const char* encrypted_file, const
 
 			/* Decrypt block */
 			if ( (written_decipher_bytes = RSA_private_decrypt(amount_read, block, decipher_block, ctx->private_rsa, RSA_NO_PADDING)) < 0) {
+				int ecode = ERR_get_error();
+ 				char* err_msg = ERR_error_string(ecode, NULL);
+ 				fprintf(stderr, "[ERROR] %s\n", err_msg);
+
 				EVP_CIPHER_CTX_free(evp_ctx);
 				fclose(ifp);
 				fclose(ofp);

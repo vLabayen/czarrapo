@@ -72,65 +72,62 @@ static long long int __get_random_index(long long int num_blocks) {
 	return output;
 }
 
-/*
- * Checks entropy for NUM_RANDOM_BLOCKS blocks in 'plaintext_file' and returns the index
- * for the most entropic one. Blocks are selected randomly, but the caller must seed the
- * RNG with srand() previously.
+/* 
+ * Check if block can be encrypted with RSA. Get key's modulus, convert block to a BIGNUM* and compare with modulus.
+ * https://stackoverflow.com/a/15892270
  */
-static long long int _select_block(const CzarrapoContext* ctx, const char* plaintext_file, unsigned int block_size, long long int num_blocks) {
-	FILE* fp;					/* File handle */
-	double block_entropy;				/* Entropy for current block */
-	double max_entropy = -1;			/* Max. entropy seen */
-	int i=0, random_index;				/* Loop variable and random access index */
-	int amount_read;				/* Amount of bytes read for each block */
-	long long int selected_block_index = -1;	/* Index of max. entropy block */
-	unsigned char block[block_size];		/* Current extracted block */
+static inline bool __check_block_bn(const CzarrapoContext* ctx, unsigned char* block, size_t len) {
+
 	BIGNUM* block_bignum;				/* RSA modulus for block */
 	const BIGNUM* key_modulus;			/* RSA modulus for key */
 
 	block_bignum = BN_new();
 
-	fp = fopen(plaintext_file, "rb");
-	while (i < NUM_RANDOM_BLOCKS) {
+	RSA_get0_key(ctx->public_rsa, &key_modulus, NULL, NULL);
+	if (BN_bin2bn(block, len, block_bignum) == NULL) {
+		BN_clear_free(block_bignum);
+		return false;
+	}
+	if (BN_ucmp(block_bignum, key_modulus) >= 0) {;
+		BN_clear_free(block_bignum);
+		return false;
+	}
 
+	BN_clear_free(block_bignum);
+	return true;
+}
+
+/*
+ * Selects a random block index from the input file. A block must have a minimum Shannon entropy value
+ * and must be able to be encrypted using RSA. The last block of a file cannot be used.
+ */
+static long long int _select_block(const CzarrapoContext* ctx, const char* plaintext_file, unsigned int block_size, long long int num_blocks) {
+	FILE* fp;
+	bool found = false;
+	long long int random_index = -1;
+	int amount_read;
+	unsigned char block[block_size];
+
+	fp = fopen(plaintext_file, "rb");
+	while (!found) {
 		random_index = __get_random_index(num_blocks);
 
 		/* Get block with selected index */
 		fseek(fp, (random_index) * block_size, SEEK_SET);
-		amount_read = fread(block, sizeof(unsigned char), block_size, fp);
-
-		/* Prevent selecting last block if size is not big enough */
-		/* TODO: allow selecting last block by adding padding */
-		if (amount_read < block_size) {
+		if ( (amount_read = fread(block, sizeof(unsigned char), block_size, fp)) < block_size )
 			continue;
-		}
 
-		/* 
-		 * Check if block can be encrypted with RSA. Get key's modulus, convert block to
-		 * a BIGNUM* and compare with modulus.
-		 * https://stackoverflow.com/a/15892270
-		 */
-		RSA_get0_key(ctx->public_rsa, &key_modulus, NULL, NULL);
-		if (BN_bin2bn(block, amount_read, block_bignum) == NULL)
+		if (!__check_block_bn(ctx, block, amount_read))
 			continue;
-		if (BN_ucmp(block_bignum, key_modulus) >= 0) {;
+
+		if (abs(__block_entropy(block, block_size)) < 1)
 			continue;
-		}
 
-		/* Valid block, increase counter */
-		++i;
-
-		/* Get entropy for current block and update selected block */
-		if ( (block_entropy = __block_entropy(block, block_size)) > max_entropy) {
-			max_entropy = block_entropy;
-			selected_block_index = random_index;
-		}
-		DEBUG_PRINT(("[DEBUG] ++ Entropy for block %i: %f ++ \n", random_index, block_entropy));
+		found = true;
 	}
-	BN_clear_free(block_bignum);
-	fclose(fp);
 
-	return selected_block_index;
+	fclose(fp);
+	return random_index;
 }
 
 /*
@@ -185,7 +182,6 @@ static int _write_header(const CzarrapoContext* ctx, const char* encrypted_file,
 
 	fclose(ef);
 	return total_written;
-
 }
 
 static int _encrypt_file(const CzarrapoContext* ctx, const char* plaintext_file, const char* encrypted_file, const unsigned char* key, const unsigned char* iv, long long int selected_block_index) {
@@ -230,8 +226,6 @@ static int _encrypt_file(const CzarrapoContext* ctx, const char* plaintext_file,
 				int ecode = ERR_get_error();
  				char* err_msg = ERR_error_string(ecode, NULL);
  				fprintf(stderr, "[ERROR] %s\n", err_msg);
-
- 				_hexarr(block, 5);
 
  				EVP_CIPHER_CTX_free(evp_ctx);
  				fclose(fp);
@@ -325,7 +319,7 @@ int czarrapo_encrypt(CzarrapoContext* ctx, const char* plaintext_file, const cha
 	if (selected_block_index < 0) {
 		srand(time(NULL));
 		selected_block_index = _select_block(ctx, plaintext_file, block_size, num_blocks);
-	} else if (selected_block_index > num_blocks) {
+	} else if (selected_block_index >= num_blocks) {
 		return ERR_FAILURE;
 	}
 	DEBUG_PRINT(("[DEBUG] Encryption block has index %lld.\n", selected_block_index));

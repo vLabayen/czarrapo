@@ -105,7 +105,49 @@ CzarrapoContext* czarrapo_init(const char* public_key_file, const char* private_
 	}
 
 	return ctx;
+}
 
+CzarrapoContext* czarrapo_copy(const CzarrapoContext* ctx) {
+	CzarrapoContext* new_ctx;
+
+	if ( (new_ctx = malloc(sizeof(CzarrapoContext))) == NULL)
+		return NULL;
+
+	/* Copy fast mode flag */
+	new_ctx->fast = ctx->fast;
+
+	/* Copy password */
+	if (ctx->password == NULL) {
+		czarrapo_free(new_ctx);
+		return NULL;
+	}
+	if ( (new_ctx->password = malloc(MAX_PASSWORD_LENGTH)) == NULL) {
+		czarrapo_free(new_ctx);
+		return NULL;
+	}
+	strncpy(new_ctx->password, ctx->password, MAX_PASSWORD_LENGTH);
+
+	/* Copy public key */
+	if (ctx->public_rsa != NULL) {
+		if ( (new_ctx->public_rsa = RSAPublicKey_dup(ctx->public_rsa)) == NULL){
+			czarrapo_free(new_ctx);
+			return NULL;
+		}
+	} else {
+		new_ctx->public_rsa = NULL;
+	}
+
+	/* Copy private key */
+	if (ctx->private_rsa != NULL) {
+		if ( (new_ctx->private_rsa = RSAPrivateKey_dup(ctx->private_rsa)) == NULL){
+			czarrapo_free(new_ctx);
+			return NULL;
+		}
+	} else {
+		new_ctx->private_rsa = NULL;
+	}
+
+	return new_ctx;
 }
 
 /* Frees the context struct and zeroes out the password */
