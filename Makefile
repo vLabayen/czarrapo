@@ -10,16 +10,26 @@ BIN_FLAGS=-fPIE
 SO_FLAGS=-fPIC -shared
 DEBUG_FLAGS=-g -D DEBUG
 
-czarrapo: src/*.c
-	$(CC) $(CFLAGS) $(BIN_FLAGS) $(LDFLAGS) $^ -o bin/czarrapo
+LIBPATH=src/tlock-queue/bin/tlock_queue.a
 
-debug: src/*.c
-	$(CC) $(CFLAGS) $(DEBUG_FLAGS) $(LDFLAGS) $^ -o bin/czarrapo
+czarrapo: submodules
+	$(CC) $(CFLAGS) $(BIN_FLAGS) $(LDFLAGS) src/*.c $(LIBPATH) -o bin/czarrapo
 
-shared: src/common.c src/decrypt.c src/thread.c src/context.c src/encrypt.c src/rsa.c
-	$(CC) $(CFLAGS) $(SO_FLAGS) $(LDFLAGS) $^ -o bin/czarrapo.so
+debug: submodules
+	$(CC) $(CFLAGS) $(DEBUG_FLAGS) $(LDFLAGS) src/*.c $(LIBPATH) -o bin/czarrapo
+
+shared: submodules
+	$(CC) $(CFLAGS) $(SO_FLAGS) $(LDFLAGS) \
+	src/common.c src/decrypt.c src/thread.c src/context.c src/encrypt.c src/rsa.c \
+	$(LIBPATH) -o bin/czarrapo.so
 
 all: czarrapo shared
+
+submodules:
+	cd src/tlock-queue && make static
+
+update-submodules:
+	git submodule update --remote
 
 testfile:
 	bash test/generate_file.bash $(test_file_size) "test/test.txt"

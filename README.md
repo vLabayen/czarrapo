@@ -6,30 +6,48 @@ czarrapo (derived from [giltzarrapo](https://hiztegiak.elhuyar.eus/eu/giltzarrap
 ## Dependencies ##
 * OpenSSL 1.1.1 (`apt install openssl-dev`)
 
-## Compiling and running a test ##
-1. Generate test file for encryption and decryption.
+## Compilation and use ##
+
+### Test program ###
+The test program generates a RSA keypair, encrypts a file and then decrypts it. To run it:
+1. Generate an random file for encryption:
 	* `make testfile` (defaults to file size of 1 MB)
-	* `make testfile test_file_size=5M` (5 MB)
+	*  Select a different size: `make testfile test_file_size=5M`
 2. Compile program:
 	* Standard compilation: `make`
 	* Compile with debug messages during execution: `make debug`
-	* Specify number of threads when using slow mode: `make num_threads=4`, `make debug num_threads=4`
-3. Run test program: `bin/czarrapo`
+3. Run the test program: `bin/czarrapo`
 4. Compare original and decrypted file: `md5sum test/test.txt; md5sum test/test.decrypt`
 5. Clean up test files, compiled binary and RSA keypair: `make clean`
 
-NOTE: the source code an also be compiled as a shared library for external use: `make shared`
+### As a shared library ###
+To compile as a shared library to use from your own code, use `make shared`. An example on how to use as a shared library from Python can be found in [giltzarrapo.py](examples/giltzarrapo.py).
 
-## Usage ##
+### Running a benchmark ###
+An example benchmark is included in [benchmarks.py](examples/benchmark.py). Sample output:
+```
+$ python3 examples/benchmark.py 
+ *** RUNNING 10 TESTS ***
+ *** Using files with size: 5M ***
+######################################################|
+[*] Errors: 0/10
+[*] Total encryption time: 1.034 seconds (9.668 files/second)
+[*] Total decryption time: 1.346 seconds (7.43 files/second)
+[*] Encryption time: avg: 0.103; max: 0.128; min: 0.094
+[*] Decryption time: avg: 0.135; max: 0.225; min: 0.118
+[*] Encryption throughput: avg: 48.9 MiB/s; max: 53.4 MiB/s; min: 39.1 MiB/s
+[*] Decryption throughput: avg: 38.4 MiB/s; max: 42.4 MiB/s; min: 22.2 MiB/s
+```
+
+## Public API ##
 The main example is written in [main.c](src/main.c). The API consists of the following functions:
 
 ```C
 /*
- * Generates RSA public and private keys with the specified passphrase. Saves them to directory/key_name and
- * directory/key_name.pub
+ * Generates RSA public and private keys with the specified passphrase. Keylen is the RSA modulus size.
  * RETURNS: zero on success, negative value on error.
  */
-int generate_RSA_pair_to_files(char* passphrase, const char* directory, const char* key_name, int keylen);
+int generate_RSA_keypair(char* passphrase, const char* pubkey, const char* privkey, int keylen);
 
 /*
  * Initializes an encryption/decryption context. The private key can be omitted for only-encryption operations; the
@@ -74,7 +92,6 @@ int czarrapo_decrypt(CzarrapoContext* ctx, const char* encrypted_file, const cha
 
 ## TO-DO ##
 * If selected_block_index is passed in with a valid value, check the block with `__check_block_bn()` before using it.
-* Better random block selection (in `_select_block()`). Do not use max. entropy as criterion.
 * Add error codes for different types of errors (currently the public API just returns -1 on error).
 * Better interrupt handling (SIGINT and SIGTERM on Linux).
 * Parallel encryption and decryption for big files.

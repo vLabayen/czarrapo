@@ -1,0 +1,3 @@
+[submodule "src/tlock-queue"]
+	path = src/tlock-queue
+	url = https://github.com/00xc/tlock-queue.git
