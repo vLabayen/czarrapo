@@ -382,14 +382,18 @@ static int _decrypt_file(CzarrapoContext* ctx, const char* encrypted_file, const
 	unsigned char decipher_block[block_size + EVP_CIPHER_block_size(cipher_type) - 1];
 
 	/* Open files */
-	if ( (ifp = fopen(encrypted_file, "rb")) == NULL || (ofp = fopen(decrypted_file, "wb")) == NULL ) {
+	if ((ifp = fopen(encrypted_file, "rb")) == NULL) {
+		EVP_CIPHER_CTX_free(evp_ctx);
+		return ERR_FAILURE;
+	}
+	if ((ofp = fopen(decrypted_file, "wb")) == NULL) {
+		fclose(ifp);
 		EVP_CIPHER_CTX_free(evp_ctx);
 		return ERR_FAILURE;
 	}
 
-	setvbuf(ofp, NULL, _IOFBF, 16384);
-
 	/* Decrypt each block */
+	setvbuf(ofp, NULL, _IOFBF, 16384);
 	fseek(ifp, header->end_offset, SEEK_SET);
 	while ( (amount_read = fread(block, sizeof(unsigned char), block_size, ifp)) ) {
 

@@ -36,11 +36,14 @@ thread_context_t* __thread_context_init(unsigned char* output, long long int* ou
 	thread_context->output_index = output_index;
 	thread_context->queue = queue;
 	thread_context->header = header;
+
+	/* Init a new context with no RSA keys */
 	if ( (thread_context->ctx = czarrapo_init(NULL, NULL, NULL, ctx->password, ctx->fast)) == NULL ) {
 		free(thread_context);
 		return NULL;
 	}
 
+	/* Manually copy the private key */
 	if ( (thread_context->ctx->private_rsa = RSAPrivateKey_dup(ctx->private_rsa)) == NULL ) {
 		czarrapo_free(thread_context->ctx);
 		free(thread_context);

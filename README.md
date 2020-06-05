@@ -1,6 +1,5 @@
 # czarrapo #
 
-## Description ##
 czarrapo (derived from [giltzarrapo](https://hiztegiak.elhuyar.eus/eu/giltzarrapo]), *padlock*) is a file encryption library with a very simple public API. It solves the problem of delivering a symmetric key to perform cipher operations, and at the same time avoids using assymetric ciphers for great amounts of data, which can in turn become slow.
 
 ## Dependencies ##

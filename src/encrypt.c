@@ -184,13 +184,45 @@ static int _write_header(const CzarrapoContext* ctx, const char* encrypted_file,
 	return total_written;
 }
 
+/*
+ * Encrypt a block of data and write to file.
+ * type 'a': AES block 
+ * type 'f': end AES cipher
+ * type 'r': RSA block
+ */
+static inline int __encrypt_and_write(void* ctx, FILE* ofp, unsigned char* input, int input_len, unsigned char* output, char type) {
+	int written_cipher_bytes;
+
+	if (type == 'a') {
+		if ( EVP_EncryptUpdate(ctx, output, &written_cipher_bytes, input, input_len) != 1 )
+			return ERR_FAILURE;
+
+	} else if (type == 'r') {
+		if ( (written_cipher_bytes = RSA_public_encrypt(input_len, input, output, ctx, RSA_NO_PADDING)) < input_len ) {
+			int ecode = ERR_get_error();
+ 			char* err_msg = ERR_error_string(ecode, NULL);
+ 			fprintf(stderr, "[ERROR] %s\n", err_msg);
+			return ERR_FAILURE;
+		}
+
+	} else if (type == 'f') {
+		if ( (EVP_EncryptFinal_ex(ctx, output, &written_cipher_bytes)) != 1)
+			return ERR_FAILURE;
+	}
+
+	/* Write to file */
+	if ( fwrite(output, sizeof(unsigned char), written_cipher_bytes, ofp) != written_cipher_bytes)
+		return ERR_FAILURE;
+
+	return 0;
+}
+
 static int _encrypt_file(const CzarrapoContext* ctx, const char* plaintext_file, const char* encrypted_file, const unsigned char* key, const unsigned char* iv, long long int selected_block_index) {
-	FILE *fp, *ef;					/* input/output file handles */
+	FILE *ifp, *ofp;				/* input/output file handles */
 	int block_size = RSA_size(ctx->public_rsa);	/* Size of buffers to read and write */
-	int amount_read, amount_written;		/* Result of fread() and fwrite() */
+	int amount_read;				/* Result of fread() */
 	unsigned char block[block_size];		/* Buffer for current read block */
 	long long int index = -1;			/* Index of current block */
-	int written_cipher_bytes;			/* Amount of bytes written with each call to EVP_EncryptUpdate() */
 
 	EVP_CIPHER_CTX* evp_ctx;			/* Cipher context struct */
 	const EVP_CIPHER* cipher_type;			/* Cipher mode, selected with input parameter */
@@ -211,76 +243,55 @@ static int _encrypt_file(const CzarrapoContext* ctx, const char* plaintext_file,
 		return ERR_FAILURE;
 	}
 
+	/* Open files */
+	if ( (ifp = fopen(plaintext_file, "rb")) == NULL ) {
+		EVP_CIPHER_CTX_free(evp_ctx);
+		return ERR_FAILURE;
+	}
+	if ( (ofp = fopen(encrypted_file, "ab")) == NULL ) {
+		EVP_CIPHER_CTX_free(evp_ctx);
+		fclose(ifp);
+		return ERR_FAILURE;
+	}
+
 	/* Read file in blocks. Encrypt each block and write to file. */
-	fp = fopen(plaintext_file, "rb");
-	ef = fopen(encrypted_file, "ab");
-	while ( (amount_read = fread(block, sizeof(unsigned char), block_size, fp)) ) {
+	setvbuf(ofp, NULL, _IOFBF, 16384);
+	while ( (amount_read = fread(block, sizeof(unsigned char), block_size, ifp)) ) {
 
 		++index;
+		
+		if (index != selected_block_index) {
 
-		/* RSA block */
-		if (index == selected_block_index) {
-
-			/* Encrypt using RSA*/
-			if ( RSA_public_encrypt(amount_read, block, cipher_block, ctx->public_rsa, RSA_NO_PADDING) < block_size ) {
-				int ecode = ERR_get_error();
- 				char* err_msg = ERR_error_string(ecode, NULL);
- 				fprintf(stderr, "[ERROR] %s\n", err_msg);
-
- 				EVP_CIPHER_CTX_free(evp_ctx);
- 				fclose(fp);
- 				fclose(ef);
- 				return ERR_FAILURE;
-			}
-
-			/* Write to file */
-			if ( (amount_written = fwrite(cipher_block, sizeof(unsigned char), block_size, ef)) < block_size ) {
+			/* AES block */
+			if (__encrypt_and_write(evp_ctx, ofp, block, amount_read, cipher_block, 'a') == ERR_FAILURE) {
 				EVP_CIPHER_CTX_free(evp_ctx);
- 				fclose(fp);
- 				fclose(ef);
- 				return ERR_FAILURE;
+				fclose(ifp);
+				fclose(ofp);
+				return ERR_FAILURE;
 			}
 
-		/* Normal AES block */
 		} else {
 
-			/* Encrypt next block */
-			if ( (EVP_EncryptUpdate(evp_ctx, cipher_block, &written_cipher_bytes, block, amount_read) != 1) ) {
-				EVP_CIPHER_CTX_free(evp_ctx);
- 				fclose(fp);
- 				fclose(ef);
- 				return ERR_FAILURE;
-			}
-
-			/* Write to file */
-			if ( (amount_written = fwrite(cipher_block, sizeof(unsigned char), written_cipher_bytes, ef)) != written_cipher_bytes) {
-				EVP_CIPHER_CTX_free(evp_ctx);
- 				fclose(fp);
- 				fclose(ef);
+			/* RSA block */
+			if (__encrypt_and_write(ctx->public_rsa, ofp, block, amount_read, cipher_block, 'r') == ERR_FAILURE){
+ 				EVP_CIPHER_CTX_free(evp_ctx);
+ 				fclose(ifp);
+ 				fclose(ofp);
  				return ERR_FAILURE;
 			}
 		}
 	}
 
-	/* End symmetric cipher */
-	if ( (EVP_EncryptFinal_ex(evp_ctx, cipher_block, &written_cipher_bytes)) != 1) {
+	if (__encrypt_and_write(evp_ctx, ofp, NULL, 0, cipher_block, 'f') == ERR_FAILURE) {
 		EVP_CIPHER_CTX_free(evp_ctx);
-		fclose(fp);
-		fclose(ef);
-		return ERR_FAILURE;
-	}
-
-	/* Write remaining data to file */
-	if ( (amount_written = fwrite(cipher_block, sizeof(unsigned char), written_cipher_bytes, ef)) != written_cipher_bytes) {
-		EVP_CIPHER_CTX_free(evp_ctx);
-		fclose(fp);
-		fclose(ef);
+		fclose(ifp);
+		fclose(ofp);
 		return ERR_FAILURE;
 	}
 
 	EVP_CIPHER_CTX_free(evp_ctx);
-	fclose(fp);
-	fclose(ef);
+	fclose(ifp);
+	fclose(ofp);
 
 	return 0;
 }

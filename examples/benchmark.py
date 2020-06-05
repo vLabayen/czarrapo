@@ -32,7 +32,7 @@ if __name__ == '__main__':
 
 	try:
 		NTESTS = 10
-		FILE_SIZE = "5M"
+		FILE_SIZE = "10M"
 		NUM_DECIMALS = 3
 
 		# Get current and parent directories
@@ -90,11 +90,11 @@ if __name__ == '__main__':
 			dec_time.append(t_decrypt - t_encrypt)
 			enc_throughput.append( enc_file_size/(t_encrypt - t_start) )
 			dec_throughput.append( dec_file_size/(t_decrypt - t_encrypt) )
-			results.append(filecmp.cmp(encrypted_file, decrypted_file))
+			results.append(filecmp.cmp(plaintext_file, decrypted_file))
 
 		print("")
 
-		print("[*] Errors: {}/{}".format(
+		print("[*] Successful tests: {}/{}".format(
 			sum(result for result in results if result), NTESTS
 		))
 
