@@ -105,12 +105,14 @@ static long long int _select_block(const CzarrapoContext* ctx, const char* plain
 	FILE* fp;
 	bool found = false;
 	long long int random_index = -1;
-	int amount_read;
+	int amount_read, tries=0;
 	unsigned char block[block_size];
 
 	fp = fopen(plaintext_file, "rb");
-	while (!found) {
+	while (!found && tries < NUM_RANDOM_BLOCKS) {
+
 		random_index = __get_random_index(num_blocks);
+		++tries;
 
 		/* Get block with selected index */
 		fseek(fp, (random_index) * block_size, SEEK_SET);
@@ -127,7 +129,10 @@ static long long int _select_block(const CzarrapoContext* ctx, const char* plain
 	}
 
 	fclose(fp);
-	return random_index;
+	if (found)
+		return random_index;
+	else
+		return ERR_FAILURE;
 }
 
 /*
@@ -329,7 +334,9 @@ int czarrapo_encrypt(CzarrapoContext* ctx, const char* plaintext_file, const cha
 	/* Select random block for encryption if not already passed in */
 	if (selected_block_index < 0) {
 		srand(time(NULL));
-		selected_block_index = _select_block(ctx, plaintext_file, block_size, num_blocks);
+		if ( (selected_block_index = _select_block(ctx, plaintext_file, block_size, num_blocks)) == ERR_FAILURE )
+			return ERR_FAILURE;
+
 	} else if (selected_block_index >= num_blocks) {
 		return ERR_FAILURE;
 	}

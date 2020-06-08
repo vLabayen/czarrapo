@@ -3,7 +3,7 @@
 
 #include "context.h"
 
-#define NUM_RANDOM_BLOCKS	5
+#define NUM_RANDOM_BLOCKS	100
 
 /*
  * Ciphers a plaintext file into an ecnrypted file. Needs a context, and optionally takes a manually selected block
