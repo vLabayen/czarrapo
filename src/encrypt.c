@@ -137,7 +137,7 @@ static long long int _select_block(const CzarrapoContext* ctx, const char* plain
  */
 static int _write_header(const CzarrapoContext* ctx, const char* encrypted_file, const unsigned char* challenge, long long int selected_block_index) {
 	FILE* ef;
-	int amount_written, total_written = 0;
+	unsigned int amount_written, total_written = 0;
 
 	/* Open file */
 	if ( (ef = fopen(encrypted_file, "wb")) == NULL )
@@ -181,7 +181,7 @@ static int _write_header(const CzarrapoContext* ctx, const char* encrypted_file,
 	}
 
 	fclose(ef);
-	return total_written;
+	return (int)total_written;
 }
 
 /*

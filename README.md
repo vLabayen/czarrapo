@@ -6,7 +6,7 @@ czarrapo (derived from [giltzarrapo](https://hiztegiak.elhuyar.eus/eu/giltzarrap
 * OpenSSL 1.1.1 (`apt install openssl-dev`)
 
 ## Compilation and use ##
-
+NOTE: do not forget to add `--recusive` to `git clone`.
 ### Test program ###
 The test program generates a RSA keypair, encrypts a file and then decrypts it. To run it:
 1. Generate an random file for encryption:

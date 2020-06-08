@@ -3,7 +3,7 @@ CC=gcc
 num_threads=7
 test_file_size=1M
 
-CFLAGS=-O3 -std=c11 -Wall -D NUM_THREADS=$(num_threads) -z noexecstack -fstack-protector -D_FORTIFY_SOURCE=2
+CFLAGS=-O3 -std=c11 -Wall -Wpedantic -D NUM_THREADS=$(num_threads) -z noexecstack -fstack-protector -D_FORTIFY_SOURCE=2
 LDFLAGS=-lcrypto -lssl -lm -pthread
 
 BIN_FLAGS=-fPIE
@@ -13,15 +13,15 @@ DEBUG_FLAGS=-g -D DEBUG
 LIBPATH=src/tlock-queue/bin/tlock_queue.a
 
 czarrapo: submodules
-	$(CC) $(CFLAGS) $(BIN_FLAGS) $(LDFLAGS) src/*.c $(LIBPATH) -o bin/czarrapo
+	$(CC) $(CFLAGS) $(BIN_FLAGS) src/*.c $(LIBPATH) $(LDFLAGS) -o bin/czarrapo
 
 debug: submodules
-	$(CC) $(CFLAGS) $(DEBUG_FLAGS) $(LDFLAGS) src/*.c $(LIBPATH) -o bin/czarrapo
+	$(CC) $(CFLAGS) $(DEBUG_FLAGS) src/*.c $(LIBPATH) $(LDFLAGS) -o bin/czarrapo
 
 shared: submodules
-	$(CC) $(CFLAGS) $(SO_FLAGS) $(LDFLAGS) \
-	src/common.c src/decrypt.c src/thread.c src/context.c src/encrypt.c src/rsa.c \
-	$(LIBPATH) -o bin/czarrapo.so
+	$(CC) $(CFLAGS) $(SO_FLAGS) \
+	src/common.c src/decrypt.c src/thread.c src/context.c src/encrypt.c src/rsa.c $(LIBPATH) \
+	$(LDFLAGS) -o bin/czarrapo.so
 
 all: czarrapo shared
 
@@ -36,6 +36,6 @@ testfile:
 	ls -lh test/test.txt
 
 clean:
-	rm -f bin/czarrapo*
+	rm -f bin/czarrapo.*
 	rm -f test/czarrapo_rsa test/czarrapo_rsa.pub
 	rm -f test/test.txt test/test.crypt test/test.decrypt

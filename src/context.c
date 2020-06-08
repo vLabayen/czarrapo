@@ -9,6 +9,10 @@
 #include "common.h"
 #include "context.h"
 
+#ifdef __STDC_NO_VLA__
+	#error "No VLA support"
+#endif
+
 /* Loads a public key into an RSA* struct */
 static RSA* _load_public_key(const char* public_key_file) {
 	RSA* rsa;
