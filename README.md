@@ -6,37 +6,39 @@ czarrapo (derived from [giltzarrapo](https://hiztegiak.elhuyar.eus/eu/giltzarrap
 * OpenSSL 1.1.1 (`apt install openssl-dev`)
 
 ## Compilation and use ##
-NOTE: do not forget to add `--recusive` to `git clone`.
-### Test program ###
-The test program generates a RSA keypair, encrypts a file and then decrypts it. To run it:
-1. Generate an random file for encryption:
-	* `make testfile` (defaults to file size of 1 MB)
-	*  Select a different size: `make testfile test_file_size=5M`
-2. Compile program:
-	* Standard compilation: `make`
-	* Compile with debug messages during execution: `make debug`
-3. Run the test program: `bin/czarrapo`
-4. Compare original and decrypted file: `md5sum test/test.txt; md5sum test/test.decrypt`
-5. Clean up test files, compiled binary and RSA keypair: `make clean`
+czarrapo can be compiled as a static or shared library. This repository includes also an [example program](src/main.c) which uses the static library, as well as as [two Python programs](examples/) which make use of the shared library.
 
-### As a shared library ###
-To compile as a shared library to use from your own code, use `make shared`. An example on how to use as a shared library from Python can be found in [giltzarrapo.py](examples/giltzarrapo.py).
+### Using the example program ###
+1. Clone repository: `git clone https://github.com/vLabayen/czarrapo.git --recursive`
+2. Generate a random 1MB file with `make testfile`. Use a different size with `make testfile test_file_size=5M`.
+3. Compile test program: `make`. To output additional information during execution, use: `make flags=-DDEBUG`
+4. Run the program: `./czarrapo`
+5. Compare the original, encrypted and decrypted file: `md5sum test/test.*`
+6. Clean up test files and compiled objects: `make clean`
 
-### Running a benchmark ###
-An example benchmark is included in [benchmarks.py](examples/benchmark.py). Sample output:
+### Using the Python program ###
+[giltzarrapo.py](examples/giltzarrapo.py) contains a class that acts as a wrapper (given the shared library) to use the public API from Python. [benchmark.py](examples/benchmark.py) uses this wrapper to encrypt and decrypt several files and report results. Example output:
 ```
 $ python3 examples/benchmark.py 
- *** RUNNING 10 TESTS ***
- *** Using files with size: 5M ***
+*** RUNNING 10 TESTS ***
+ *** Using files with size: 10M ***
 ######################################################|
-[*] Errors: 0/10
-[*] Total encryption time: 1.034 seconds (9.668 files/second)
-[*] Total decryption time: 1.346 seconds (7.43 files/second)
-[*] Encryption time: avg: 0.103; max: 0.128; min: 0.094
-[*] Decryption time: avg: 0.135; max: 0.225; min: 0.118
-[*] Encryption throughput: avg: 48.9 MiB/s; max: 53.4 MiB/s; min: 39.1 MiB/s
-[*] Decryption throughput: avg: 38.4 MiB/s; max: 42.4 MiB/s; min: 22.2 MiB/s
+[*] Successful tests: 10/10
+[*] Total encryption time: 0.126 seconds (79.177 files/second)
+[*] Total decryption time: 1.261 seconds (7.93 files/second)
+[*] Encryption time: avg: 0.013; max: 0.013; min: 0.012
+[*] Decryption time: avg: 0.126; max: 0.198; min: 0.02
+[*] Encryption throughput: avg: 792.6 MiB/s; max: 853.1 MiB/s; min: 745.6 MiB/s
+[*] Decryption throughput: avg: 145.6 MiB/s; max: 492.1 MiB/s; min: 50.4 MiB/s
 ```
+
+### Compiling as a static library ###
+1. Compile as a static library: `make static`
+2. Compile your program: `gcc -I <path to czarrapo/src> yourprogram.c libczarrapo.a -lcrypto -lssl -lm -pthread`.
+
+### Compiling as a shared library ###
+1. Compile as a shared library: `make shared`
+2. Link against it like with any shared library. An example on how to do so with Python can be found in [giltzarrapo.py](examples/giltzarrapo.py).
 
 ## Public API ##
 The main example is written in [main.c](src/main.c). The API consists of the following functions:
@@ -93,4 +95,4 @@ int czarrapo_decrypt(CzarrapoContext* ctx, const char* encrypted_file, const cha
 * If selected_block_index is passed in with a valid value, check the block with `__check_block_bn()` before using it.
 * Add error codes for different types of errors (currently the public API just returns -1 on error).
 * Better interrupt handling (SIGINT and SIGTERM on Linux).
-* Parallel encryption and decryption for big files.
+* Add parallel encryption and decryption for big files.

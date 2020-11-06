@@ -17,7 +17,7 @@
  * Returns the Shannon entropy for a buffer of 'block_size'. This function
  * will modify the input buffer always.
  */
-static double __block_entropy(unsigned char* buf, unsigned int block_size) {
+static double __block_entropy(unsigned char* restrict buf, unsigned int block_size) {
 
 	/* Order bytes in input block */
 	int i, j;

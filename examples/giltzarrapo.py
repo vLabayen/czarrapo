@@ -35,7 +35,7 @@ class Giltzarrapo():
 		if generate_RSA_keypair and pubkey and privkey:
 			res = self.lib.generate_RSA_keypair(passphrase, pubkey, privkey, c_int(4096))
 			if res < 0:
-				raise TypeError("Error")
+				raise TypeError("Could not generate RSA keypair")
 
 		self.lib.czarrapo_init.restype = POINTER(CzarrapoCtx)
 		self.ctx = self.lib.czarrapo_init(
@@ -47,7 +47,7 @@ class Giltzarrapo():
 		)
 
 		if not self.ctx:
-			raise TypeError("Error")
+			raise TypeError("Could not init context")
 			
 		atexit.register(self.__free)
 

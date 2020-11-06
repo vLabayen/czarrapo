@@ -3,30 +3,45 @@ CC=gcc
 num_threads=7
 test_file_size=1M
 
-CFLAGS=-O3 -std=c11 -Wall -Wpedantic -D NUM_THREADS=$(num_threads) -z noexecstack -fstack-protector -D_FORTIFY_SOURCE=2
+CFLAGS=-Wall -Wpedantic -std=c11 -O3 -fPIC -D NUM_THREADS=$(num_threads) -I ./lib -z noexecstack -fstack-protector -D_FORTIFY_SOURCE=2 $(flags)
 LDFLAGS=-lcrypto -lssl -lm -pthread
-
-BIN_FLAGS=-fPIE
 SO_FLAGS=-fPIC -shared
-DEBUG_FLAGS=-g -D DEBUG
 
-LIBPATH=src/tlock-queue/bin/tlock_queue.a
+# Our compiled objects
+OBJECTS = bin/common.o bin/context.o bin/decrypt.o bin/encrypt.o bin/rsa.o bin/thread.o
+OBJ_MAIN = bin/main.o
+# Our generated libraries
+STATIC_LIB = libczarrapo.a
+SHARED_LIB = libczarrapo.so
+# Libraries we depend on
+SUBMODULES = lib/tlock-queue/libtlockqueue.a
+# Temporary script used to bundle all of our dependencies into our static library
+ARSCRIPT = ar.script
 
-czarrapo: submodules
-	$(CC) $(CFLAGS) $(BIN_FLAGS) src/*.c $(LIBPATH) $(LDFLAGS) -o bin/czarrapo
+.PHONY =  static shared submodules all update-submodules testfile clean
 
-debug: submodules
-	$(CC) $(CFLAGS) $(DEBUG_FLAGS) src/*.c $(LIBPATH) $(LDFLAGS) -o bin/czarrapo
+bin/%.o: src/%.c
+	$(CC) $(CFLAGS) -c $^ -o $@
 
-shared: submodules
-	$(CC) $(CFLAGS) $(SO_FLAGS) \
-	src/common.c src/decrypt.c src/thread.c src/context.c src/encrypt.c src/rsa.c $(LIBPATH) \
-	$(LDFLAGS) -o bin/czarrapo.so
+czarrapo: $(OBJ_MAIN) static submodules
+	$(CC) -fPIE $< $(STATIC_LIB) -o $@ $(LDFLAGS)
 
-all: czarrapo shared
+static: $(OBJECTS) submodules
+	echo "CREATE $(STATIC_LIB)" > $(ARSCRIPT)
+	for dependency in $(SUBMODULES); do (echo "ADDLIB $$dependency" >> $(ARSCRIPT)); done
+	echo "ADDMOD $(OBJECTS)" >> $(ARSCRIPT)
+	echo "SAVE" >> $(ARSCRIPT)
+	echo "END" >> $(ARSCRIPT)
+	ar -M < $(ARSCRIPT)
+	rm $(ARSCRIPT)
+
+shared: $(OBJECTS) submodules
+	$(CC) $(SO_FLAGS) $(OBJECTS) $(SUBMODULES) $(LDFLAGS) -o $(SHARED_LIB)
 
 submodules:
-	cd src/tlock-queue && make static
+	cd lib/tlock-queue && make static
+
+all: static shared czarrapo
 
 update-submodules:
 	git submodule update --remote
@@ -36,6 +51,11 @@ testfile:
 	ls -lh test/test.txt
 
 clean:
-	rm -f bin/czarrapo.*
 	rm -f test/czarrapo_rsa test/czarrapo_rsa.pub
-	rm -f test/test.txt test/test.crypt test/test.decrypt
+	rm -f test/test.*
+	rm -f $(OBJECTS) $(OBJ_MAIN)
+	rm -f $(STATIC_LIB) $(SHARED_LIB)
+	rm -f czarrapo
+	cd lib/tlock-queue && make clean
+
+

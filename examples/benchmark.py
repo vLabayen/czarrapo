@@ -40,7 +40,7 @@ if __name__ == '__main__':
 		upper_directory = os.path.dirname(current_directory)
 
 		# Dynamic library path
-		dynamic_library = os.path.join(upper_directory, "bin", "czarrapo.so")
+		dynamic_library = os.path.join(upper_directory, "libczarrapo.so")
 		if not os.path.isfile(dynamic_library):
 			sys.exit("[-] Dynamic library file not found. Use 'make shared' or 'make all'.")
 
@@ -54,7 +54,7 @@ if __name__ == '__main__':
 		# Bash command to generate a test file
 		GENERATE_FILE = "bash {} {} {}".format(
 			os.path.join(upper_directory, "test", "generate_file.bash"), FILE_SIZE, plaintext_file
-		)
+		).split()
 
 		# Stats
 		enc_time = []
@@ -74,7 +74,7 @@ if __name__ == '__main__':
 			
 			loading_bar(i, NTESTS)
 
-			subprocess.run(GENERATE_FILE.split())
+			subprocess.run(GENERATE_FILE)
 			t_start = time.perf_counter()
 
 			gz.encrypt(plaintext_file, encrypted_file)

@@ -8,7 +8,7 @@
 /* Internal modules */
 #include "common.h"
 #include "context.h"
-#include "tlock-queue/src/tlock_queue.h"
+#include <tlock-queue/src/tlock_queue.h>
 
 /* Struct and functions for the actual data passed to the queue */
 typedef struct {
